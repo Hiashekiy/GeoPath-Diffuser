@@ -1,0 +1,107 @@
+{
+  "checks": [
+    {
+      "check": "occupancy bottleneck is 32x32",
+      "ok": true,
+      "detail": "(1, 192, 32, 32)"
+    },
+    {
+      "check": "bottleneck channels == 192",
+      "ok": true,
+      "detail": "192"
+    },
+    {
+      "check": "full feature is 256x256",
+      "ok": true,
+      "detail": "(1, 128, 256, 256)"
+    },
+    {
+      "check": "all PathSafe parameters frozen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "map memory is 1024 x 384",
+      "ok": true,
+      "detail": "(1, 1024, 384)"
+    },
+    {
+      "check": "safety geometry generated exactly once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "first forwards are map-only, later ones safety-conditioned",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "one guided search for the sample",
+      "ok": true,
+      "detail": "[{'status': 'success', 'fallback': None, 'sources': 64, 'expanded': 320, 'valid': True}]"
+    },
+    {
+      "check": "search produced a feasible path",
+      "ok": true,
+      "detail": "success"
+    },
+    {
+      "check": "64 ellipses generated",
+      "ok": true,
+      "detail": "(1, 64, 6)"
+    },
+    {
+      "check": "safety tokens are 128 path + 64 ellipse",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "corridor pack built",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "corridor scope is local (collision intervals only)",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "check": "ALM executed on the frozen pack",
+      "ok": true,
+      "detail": "3 steps"
+    },
+    {
+      "check": "ALM never fed back to the network (no feedback key in the trace)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "endpoints match start/goal",
+      "ok": true,
+      "detail": "start err 0.0000, goal err 0.0000"
+    }
+  ],
+  "metrics": {
+    "collision_rate": 0.0,
+    "collision_free": true,
+    "min_clearance_m": 1.5,
+    "mean_clearance_m": 3.482914221227109,
+    "length_m": 38.68439268799265,
+    "mean_curvature": 8.670518007066601,
+    "max_curvature": 78.03426370511855,
+    "end_to_end_distance_m": 34.558826658322765,
+    "num_dense_samples": 898
+  },
+  "timing": {
+    "map_encode_s": 0.12413470000319649,
+    "initial_diffusion_s": 0.21454819999053143,
+    "search_s": 0.20311969998874702,
+    "ellipse_s": 0.030271399999037385,
+    "corridor_s": 0.01568889999180101,
+    "safety_total_s": 0.24946510000154376,
+    "guided_diffusion_s": 0.14861430000746623,
+    "alm_s": 0.004722300000139512,
+    "final_validation_s": 0.005682400005753152,
+    "total_s": 0.7631771000014851
+  }
+}

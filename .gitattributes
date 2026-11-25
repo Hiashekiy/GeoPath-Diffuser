@@ -1,0 +1,11 @@
+# Keep the repository content LF so the migrated Python modules stay byte-identical
+# to their upstream form (references/ is not tracked; see .gitignore).
+* text=auto eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.png binary
+*.pt binary
+*.npz binary

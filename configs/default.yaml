@@ -1,0 +1,168 @@
+# ===========================================================================
+# GeoPath-Diffuser - default configuration
+#
+# Sections mirror the design document
+# (docs/安全条件扩散轨迹规划方案_Conditional-DiT网络修正版.md):
+#   map_encoder / map_condition / diffusion / trajectory / guidance /
+#   safety_condition / corridor / alm / sampling / training / dataset /
+#   dual_branch_training / evaluation
+#
+# NOTE ON UNITS: the trajectory / B-spline / ALM state lives in normalised
+# `[-1, 1]^2` scene coordinates (the same convention as PathSafe
+# `world_to_grid` and TrajSafe `convex_region`).  Maps, SDF, LiDAR and the
+# PathSafe-EllipseNet input stay in metres.  `dataset.res_m * dataset.grid`
+# fixes the extent (0.25 m * 256 = 64 m).
+# ===========================================================================
+
+map_encoder:
+  source: "PathSafe-EllipseNet"
+  # resolved against references/PathSafe-Ellipse/checkpoints/v3_best.pt
+  checkpoint: "references/PathSafe-Ellipse/checkpoints/v3_best.pt"
+  freeze: true
+  eval_mode: true
+  occupancy_encoder: true
+  sdf_encoder: true
+  use_bottleneck: true               # Diffusion map condition = enc3 bottleneck
+  use_full_features_for_safety: true # PathSafe local queries use full feature
+  sdf_clip_m: 8.0                    # = PathSafe `data.d_clip`
+
+map_condition:
+  enabled: true
+  projection_dim: 384                # == diffusion.hidden_dim
+  bottleneck_channels: 192           # enc3 channels for base=24
+  grid: 32                           # 256 / 8 -> 32x32 -> 1024 tokens
+  positional_encoding: "2d_sincos"
+  preserve_spatial_resolution: true  # 1x1 conv only, no down/up sampling
+
+diffusion:
+  backbone: "conditional_dit"        # NEW network, not TrajSafe V5
+  variant: "DiT-S"
+  prediction_type: "x0"
+  hidden_dim: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4
+  dropout: 0.0
+  timestep_embedding: "sinusoidal_mlp"
+  timestep_modulation: "adaln_zero"
+  condition_fusion: "cross_attention"
+  train_diffusion_steps: 1000
+  beta_schedule: "squaredcos_cap_v2"
+  sampler: "ddim"
+
+trajectory:
+  degree: 3
+  num_controls: 32                   # validated against long-path fit error
+  curve_points: 128
+
+guidance:
+  lam: 0.01                          # scale with grid side (upstream: 0.02 @ 64)
+  weight: "linear"                   # upstream best: linear field weight
+  policy: "B3_linear_fusion"         # upstream best expansion ratio
+  alpha: 0.25
+  gamma: 0.5
+  num_sources: 64
+  path_points: 128
+  source_method: "M0"                # drop obstacle sources (keep progress hole)
+  projection_radius: 4
+  inflation_cells: 0                 # `blocked` already includes the robot radius
+
+safety_condition:
+  enabled: true
+  path_points: 128
+  num_ellipses: 64
+  ellipse_feature_dim: 6
+  path_embedding: "linear"
+  ellipse_embedding: "mlp"
+  add_modality_embedding: true
+  build_corridor_only_near_collision: true
+  geometry_fixed_after_generation: true
+
+corridor:
+  min_overlap_ratio: 0.10            # corridor.min_overlap_ratio (upstream)
+  bridge:
+    enabled: true
+    max_bridge_per_gap: 1
+  region:
+    safety_margin: 0.02
+    obstacle_window_half: 0.35
+    obstacle_dilation: 0
+    corridor_chunk_size: 512
+    ellipse_axis_min: 0.002
+    ellipse_axis_max: 2.0
+    map_boundary_faces: true
+  local:
+    pad_queries: 4                   # corridor.local.pad_queries
+    min_queries: 8                   # corridor.local.min_queries
+    max_spans: 3
+  # Training cache scope.  "full" builds one region per ellipse for the offline
+  # cache because the GT curve is collision-free by construction (a local scope
+  # would yield an EMPTY constraint set and a dead L_corridor).  Inference always
+  # uses the local scope required by section 6.4.
+  training_scope: "full"
+
+alm:
+  enabled: true
+  mode: "guided_bspline"
+  inner_steps: 6                     # alm.inner_steps (upstream)
+  step_size: 0.05                    # alm.step_size
+  rho: 5.0                           # alm.rho
+  proximity_weight: 1.0
+  correction_smooth_weight: 0.1
+  constraint_tol: 0.001
+  max_curve_step_scene: 0.20
+  inherit_dual_across_reverse_steps: true
+  dense_verify_points: 512
+
+sampling:
+  safety_generation: "once_at_intermediate_step"
+  mid_forward_fraction: 0.5          # fraction of executed forwards before it
+  reuse_safety_geometry: true
+  alm_before_ddim_update: true
+  steps: 50                          # 20/50/100 to be compared, never 4
+  seed: 0
+
+training:
+  epochs: 1
+  batch_size: 4
+  lr: 0.0002
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  collision_margin_m: 0.3
+  log_every: 10
+  ckpt_dir: "outputs/checkpoints"
+
+dataset:
+  res_m: 0.25
+  grid: 256
+  extent_m: 64.0
+  robot_radius_cells: 2
+  min_geodesic_m: 20.0
+  path_points: 128
+  train_size: 32
+  val_size: 8
+  test_size: 8
+  cache_dir: "outputs/cache"
+
+loss_weights:
+  lambda_u: 1.0
+  lambda_c: 1.0
+  lambda_align: 0.5
+  lambda_collision: 1.0
+  lambda_corridor: 1.0
+
+dual_branch_training:
+  enabled: true
+  shared_diffusion_parameters: true
+  map_only_branch: true
+  safety_conditioned_branch: true
+  same_noise_and_timestep: true
+  synchronous_forward: true
+  joint_backward: true
+  align_target: "stop_gradient_safety_conditioned"
+
+evaluation:
+  figure_dir: "outputs/figures"
+  report_dir: "outputs/reports"
+  collision_res_m: 0.05
+  timings: true

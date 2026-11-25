@@ -1,0 +1,16 @@
+# 长路径实验配置：B-spline 控制点数 32 -> 64
+#
+# 依据 `outputs/reports/bspline_fit.md`（scripts/check_bspline_fit.py 生成）：
+#   >60 m 路径，C=32 的最大重建误差 0.62 m，C=64 降到 0.28 m。
+# 本文件只覆盖轨迹表示，网络仍是 12 层 Conditional DiT-S（384/6/4），
+# 与设计文档 §4.1 "控制点数是轨迹表示参数、不是网络深度" 一致。
+#
+#   python scripts/run_inference.py --config configs/c64_longpath.yaml
+
+trajectory:
+  num_controls: 64
+  degree: 3
+  curve_points: 128
+
+diffusion:
+  num_controls: 64        # 由 factory 从 trajectory 读取；显式写出便于检查

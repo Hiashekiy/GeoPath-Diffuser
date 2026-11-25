@@ -1,0 +1,40 @@
+# ===========================================================================
+# GeoPath-Diffuser
+#
+# NOTE: the three reference repositories under references/ are READ-ONLY clones
+# used as reference code.  They are deliberately NOT part of this project (no
+# development happens in them), so they are never committed here.
+# Re-create them with:
+#   git clone -b main https://github.com/Hiashekiy/Astar-Diffusion.git references/Astar-Diffusion
+#   git clone -b feature/v2.1-centerline https://github.com/Hiashekiy/PathSafe-Ellipse.git references/PathSafe-Ellipse
+#   git clone -b v4-map16-fbdelta-safeloss https://github.com/Hiashekiy/TrajSafe-Diffuser.git references/TrajSafe-Diffuser
+# ===========================================================================
+references/
+
+# --- run artifacts ---------------------------------------------------------
+# checkpoints are ~170 MB for the 44.9 M-parameter DiT; the safety-condition
+# cache is regenerable from scripts/build_safety_cache.py
+outputs/checkpoints/
+outputs/cache/
+
+# --- python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# --- OS / editors ---------------------------------------------------------
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
+~$*
+
+# --- scratch --------------------------------------------------------------
+_scratch_*

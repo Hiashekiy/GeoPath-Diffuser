@@ -1,0 +1,282 @@
+{
+  "config_summary": {
+    "diffusion": {
+      "backbone": "conditional_dit",
+      "variant": "DiT-S",
+      "hidden_dim": 384,
+      "depth": 12,
+      "num_heads": 6,
+      "mlp_ratio": 4.0,
+      "num_controls": 32,
+      "path_points": 128,
+      "num_ellipses": 64,
+      "map_grid": 32,
+      "parameters": 44792450
+    },
+    "map_encoder_frozen": true,
+    "map_encoder_trainable_parameters": 0,
+    "pathsafe_checkpoint": {
+      "path": "D:\\ProjectDirectory\\GeoPath-Diffuser\\references\\PathSafe-Ellipse\\checkpoints\\v3_best.pt",
+      "epoch": 0,
+      "step": 1250,
+      "params": 5041093
+    },
+    "safety_generator_trainable_parameters": 0,
+    "trajectory": {
+      "num_controls": 32,
+      "degree": 3,
+      "curve_points": 128
+    }
+  },
+  "split": "test",
+  "indices": [
+    0,
+    1,
+    2
+  ],
+  "steps": 10,
+  "modes": {
+    "map_only": {
+      "aggregate": {
+        "collision_rate": 0.15436174820836993,
+        "min_clearance_m": -1.6734638731977405,
+        "mean_clearance_m": 2.6966409342432915,
+        "length_m": 58.065516664635766,
+        "mean_curvature": 2.4388608365506763,
+        "max_curvature": 59.38901751071088,
+        "end_to_end_distance_m": 33.79934068115845,
+        "num_dense_samples": 1228.0,
+        "corridor_violation_m": 0.0,
+        "inference_s": 0.5670856333260114,
+        "index": 1.0,
+        "alm_steps": 0.0,
+        "num_samples": 3,
+        "success_rate": 0.3333333333333333
+      },
+      "rows": [
+        {
+          "collision_rate": 0.0,
+          "collision_free": true,
+          "min_clearance_m": 0.30269527435302734,
+          "mean_clearance_m": 2.9423293893811246,
+          "length_m": 46.70952262376687,
+          "mean_curvature": 3.1122879468788045,
+          "max_curvature": 83.93354986474453,
+          "end_to_end_distance_m": 34.558826658322765,
+          "num_dense_samples": 1000,
+          "corridor_violation_m": 0.0,
+          "inference_s": 0.5703570999903604,
+          "index": 0,
+          "search_status": null,
+          "alm_steps": 0,
+          "safety_generated": false
+        },
+        {
+          "collision_rate": 0.14127861089187055,
+          "collision_free": false,
+          "min_clearance_m": -1.0744688228395929,
+          "mean_clearance_m": 2.349253647661885,
+          "length_m": 59.94875599649107,
+          "mean_curvature": 2.2344432958312557,
+          "max_curvature": 52.44869486122128,
+          "end_to_end_distance_m": 40.51311516040207,
+          "num_dense_samples": 1267,
+          "corridor_violation_m": 0.0,
+          "inference_s": 0.5692705999972532,
+          "index": 1,
+          "search_status": null,
+          "alm_steps": 0,
+          "safety_generated": false
+        },
+        {
+          "collision_rate": 0.32180663373323926,
+          "collision_free": false,
+          "min_clearance_m": -4.248618071106655,
+          "mean_clearance_m": 2.798339765686866,
+          "length_m": 67.53827137364935,
+          "mean_curvature": 1.9698512669419694,
+          "max_curvature": 41.78480780616682,
+          "end_to_end_distance_m": 26.326080224750513,
+          "num_dense_samples": 1417,
+          "corridor_violation_m": 0.0,
+          "inference_s": 0.5616291999904206,
+          "index": 2,
+          "search_status": null,
+          "alm_steps": 0,
+          "safety_generated": false
+        }
+      ],
+      "timing": {
+        "map_encode_s": 0.14610570001241285,
+        "initial_diffusion_s": 0.4053179000184173,
+        "final_validation_s": 0.0059234000073047355,
+        "total_s": 0.5586591999890516
+      }
+    },
+    "no_alm": {
+      "aggregate": {
+        "collision_rate": 0.15529859598685036,
+        "min_clearance_m": -1.6861826092123262,
+        "mean_clearance_m": 2.685610297689417,
+        "length_m": 58.266086677851284,
+        "mean_curvature": 2.4699677331526617,
+        "max_curvature": 68.64243159747826,
+        "end_to_end_distance_m": 33.79934068115845,
+        "num_dense_samples": 1229.6666666666667,
+        "corridor_violation_m": 42.13630633815308,
+        "inference_s": 0.8262772666639648,
+        "index": 1.0,
+        "alm_steps": 0.0,
+        "num_samples": 3,
+        "success_rate": 0.3333333333333333
+      },
+      "rows": [
+        {
+          "collision_rate": 0.0,
+          "collision_free": true,
+          "min_clearance_m": 0.26996638614027635,
+          "mean_clearance_m": 2.928577752380076,
+          "length_m": 46.818526444487375,
+          "mean_curvature": 3.1794980221616975,
+          "max_curvature": 100.20698128999415,
+          "end_to_end_distance_m": 34.558826658322765,
+          "num_dense_samples": 1002,
+          "corridor_violation_m": 49.72106254529763,
+          "inference_s": 0.8986487999936799,
+          "index": 0,
+          "search_status": "success",
+          "alm_steps": 0,
+          "safety_generated": true
+        },
+        {
+          "collision_rate": 0.14218009478672985,
+          "collision_free": false,
+          "min_clearance_m": -1.081139592472653,
+          "mean_clearance_m": 2.335323922141975,
+          "length_m": 60.250331476538314,
+          "mean_curvature": 2.241481236340203,
+          "max_curvature": 57.95820533181165,
+          "end_to_end_distance_m": 40.51311516040207,
+          "num_dense_samples": 1266,
+          "corridor_violation_m": 49.297857079513165,
+          "inference_s": 0.876732799995807,
+          "index": 1,
+          "search_status": "success",
+          "alm_steps": 0,
+          "safety_generated": true
+        },
+        {
+          "collision_rate": 0.32371569317382126,
+          "collision_free": false,
+          "min_clearance_m": -4.247374621304601,
+          "mean_clearance_m": 2.792929218546201,
+          "length_m": 67.72940211252815,
+          "mean_curvature": 1.9889239409560853,
+          "max_curvature": 47.762108170629006,
+          "end_to_end_distance_m": 26.326080224750513,
+          "num_dense_samples": 1421,
+          "corridor_violation_m": 27.389999389648438,
+          "inference_s": 0.7034502000024077,
+          "index": 2,
+          "search_status": "success",
+          "alm_steps": 0,
+          "safety_generated": true
+        }
+      ],
+      "timing": {
+        "map_encode_s": 0.15803310000046622,
+        "initial_diffusion_s": 0.21165399998426437,
+        "search_s": 0.2042922999971779,
+        "ellipse_s": 0.02786030000424944,
+        "corridor_s": 0.031092099990928546,
+        "safety_total_s": 0.2636443999945186,
+        "guided_diffusion_s": 0.25402970000868663,
+        "final_validation_s": 0.007537500001490116,
+        "total_s": 0.8962059000041336
+      }
+    },
+    "full": {
+      "aggregate": {
+        "collision_rate": 0.21527916922103885,
+        "min_clearance_m": -2.187418516636361,
+        "mean_clearance_m": 4.161534078043693,
+        "length_m": 85.995508873172,
+        "mean_curvature": 2.1171289358901926,
+        "max_curvature": 57.50908902529812,
+        "end_to_end_distance_m": 33.79934068115845,
+        "num_dense_samples": 1784.6666666666667,
+        "corridor_violation_m": 35.96481656013839,
+        "inference_s": 0.8854202999937115,
+        "index": 1.0,
+        "alm_steps": 5.0,
+        "num_samples": 3,
+        "success_rate": 0.0
+      },
+      "rows": [
+        {
+          "collision_rate": 0.2512690355329949,
+          "collision_free": false,
+          "min_clearance_m": -1.2354416930301682,
+          "mean_clearance_m": 2.997505000295426,
+          "length_m": 75.48811346993553,
+          "mean_curvature": 2.375272565406999,
+          "max_curvature": 67.33254657637818,
+          "end_to_end_distance_m": 34.558826658322765,
+          "num_dense_samples": 1576,
+          "corridor_violation_m": 40.17598179577908,
+          "inference_s": 0.9342871999979252,
+          "index": 0,
+          "search_status": "success",
+          "alm_steps": 5,
+          "safety_generated": true
+        },
+        {
+          "collision_rate": 0.07085277895630038,
+          "collision_free": false,
+          "min_clearance_m": -1.0794392355743123,
+          "mean_clearance_m": 6.694168015289453,
+          "length_m": 114.76901103705232,
+          "mean_curvature": 1.9871903013074943,
+          "max_curvature": 57.43261232888716,
+          "end_to_end_distance_m": 40.51311516040207,
+          "num_dense_samples": 2357,
+          "corridor_violation_m": 40.328468494987646,
+          "inference_s": 0.9296654999925522,
+          "index": 1,
+          "search_status": "success",
+          "alm_steps": 5,
+          "safety_generated": true
+        },
+        {
+          "collision_rate": 0.32371569317382126,
+          "collision_free": false,
+          "min_clearance_m": -4.247374621304601,
+          "mean_clearance_m": 2.792929218546201,
+          "length_m": 67.72940211252815,
+          "mean_curvature": 1.9889239409560853,
+          "max_curvature": 47.762108170629006,
+          "end_to_end_distance_m": 26.326080224750513,
+          "num_dense_samples": 1421,
+          "corridor_violation_m": 27.389999389648438,
+          "inference_s": 0.7923081999906572,
+          "index": 2,
+          "search_status": "success",
+          "alm_steps": 5,
+          "safety_generated": true
+        }
+      ],
+      "timing": {
+        "map_encode_s": 0.15923479999764822,
+        "initial_diffusion_s": 0.22517139998672064,
+        "search_s": 0.21322149998741224,
+        "ellipse_s": 0.01911130000371486,
+        "corridor_s": 0.015859700011787936,
+        "safety_total_s": 0.24854090000735596,
+        "guided_diffusion_s": 0.24217320002207998,
+        "alm_s": 0.02418400000897236,
+        "final_validation_s": 0.0038404999941121787,
+        "total_s": 0.9288164000026882
+      }
+    }
+  }
+}
