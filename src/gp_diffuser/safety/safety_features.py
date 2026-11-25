@@ -16,6 +16,7 @@ untouched; this module only generates geometry.
 """
 from __future__ import annotations
 
+import math
 import os
 from typing import Dict, Optional
 
@@ -230,6 +231,26 @@ class SafetyConditionGenerator(nn.Module):
             "raw": out,
         }
 
+
+
+def ellipse_shape4_to_scene(shape4_m: torch.Tensor, scene_scale: float) -> torch.Tensor:
+    """Metre ``[log a_m, log b_m, cos2t, sin2t]`` -> scene units.
+
+    The convex-region builder (``convex_region.ellipse_shape4_to_quadratic``)
+    exponentiates the first two channels, so they must already be log-axes in the
+    normalised scene frame.  Dividing the axes by ``scene_scale`` is exactly a
+    constant shift of the log-axes, so this is done with a subtraction (no
+    exp/log round trip, therefore no clamping loss).
+
+    Code review P0-2: the first implementation converted the ellipse centres and
+    the token axes but passed the raw metre ``shape4`` to the region builder,
+    which made every ellipse 32x too large in scene coordinates.
+    """
+    if scene_scale <= 0:
+        raise ValueError("scene_scale must be positive")
+    out = shape4_m.clone()
+    out[..., 0:2] = shape4_m[..., 0:2] - math.log(float(scene_scale))
+    return out
 
 def resample_arclength(points: torch.Tensor, count: int) -> torch.Tensor:
     """Uniform arc-length resampling of ``[B,N,2]`` polylines to ``[B,count,2]``."""

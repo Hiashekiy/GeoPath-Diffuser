@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from ..models.conditional_dit import ConditionalDiT
-from ..safety.local_regions import pad_region_tables, pack_from_tables
+from ..safety.local_regions import pack_from_tables
 from .losses import (alignment_loss, collision_loss, control_loss, corridor_loss,
                      total_loss)
 
@@ -75,9 +75,14 @@ class DualBranchTrainer:
                                   device=self.device)
         valid = torch.ones(path.shape[0], path.shape[1] + ellipse.shape[1],
                            dtype=torch.bool, device=self.device)
-        tables = [{"cell_A": cache["cell_A"][i], "cell_b": cache["cell_b"][i],
-                   "cell_mask": cache["cell_mask"][i], "anchors": cache["anchors"][i]}
-                  for i in index]
+        is_box = cache.get("cell_is_box")
+        tables = []
+        for i in index:
+            table = {"cell_A": cache["cell_A"][i], "cell_b": cache["cell_b"][i],
+                     "cell_mask": cache["cell_mask"][i], "anchors": cache["anchors"][i]}
+            if is_box is not None:
+                table["cell_is_box"] = is_box[i]
+            tables.append(table)
         return {"path": path, "ellipse": ellipse, "valid": valid}, tables
 
     # -------------------------------------------------------------- train step
@@ -100,7 +105,10 @@ class DualBranchTrainer:
                                          features["sdf_bottleneck"])
 
         safety_condition, tables = self._safety_conditions(cache, index)
-        pack = pack_from_tables(self.codec, tables)
+        # P1-2: the corridor loss must see the OBSTACLE cells only.  The map-box
+        # cells are a fallback that would teach the model to hug the map border.
+        pack = pack_from_tables(self.codec, tables, include_box=False,
+                                device=self.device)
 
         # ---- the SAME noise and timestep for both branches ----------------
         T = int(self.schedule.num_timesteps)
@@ -147,6 +155,9 @@ class DualBranchTrainer:
             "loss_align": float(loss_align.mean().item()),
             "loss_collision": float(loss_col.mean().item()),
             "loss_corridor": float(loss_corr.mean().item()),
+            "corridor_pieces": int(pack.piece_mask.sum().item()) if pack is not None else 0,
+            "corridor_samples": int((pack.piece_mask.any(dim=1)).sum().item())
+                               if pack is not None else 0,
             "timestep_mean": float(t.float().mean().item()),
             "batch": int(B),
         }

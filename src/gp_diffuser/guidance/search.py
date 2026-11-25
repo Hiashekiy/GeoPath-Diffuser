@@ -123,11 +123,17 @@ class GuidanceFieldSearch:
         occ = np.where(occ > 0, OCCUPIED, FREE).astype(np.int8)
         grid = Grid(occ)
 
-        start_cell = self._project_free(grid, tuple(np.rint(self.world_to_cell(np.asarray(start_xy))[0]).astype(int)), self.projection_radius)
-        goal_cell = self._project_free(grid, tuple(np.rint(self.world_to_cell(np.asarray(goal_xy))[0]).astype(int)), self.projection_radius)
+        start_raw = tuple(np.rint(self.world_to_cell(np.asarray(start_xy))[0]).astype(int))
+        goal_raw = tuple(np.rint(self.world_to_cell(np.asarray(goal_xy))[0]).astype(int))
+        start_cell = self._project_free(grid, start_raw, self.projection_radius)
+        goal_cell = self._project_free(grid, goal_raw, self.projection_radius)
         if start_cell is None or goal_cell is None:
             return {"status": "invalid_endpoints", "path_xy": None, "fallback": None,
-                    "sources": 0, "expanded": 0, "valid": False}
+                    "sources": 0, "expanded": 0, "valid": False,
+                    "endpoint_projected": True, "path_verified": False}
+        # an endpoint that had to be snapped to free space is reported, because the
+        # final path still has to pass through the ORIGINAL endpoint
+        endpoint_projected = bool(start_cell != start_raw or goal_cell != goal_raw)
 
         guide_cells = self.world_to_cell(guide_xy)
         # keep the guide inside the map so the source sampler stays meaningful
@@ -164,6 +170,20 @@ class GuidanceFieldSearch:
         world[-1] = np.asarray(goal_xy, dtype=np.float64).reshape(2)
         path = resample_polyline(world, self.path_points)
 
+        # verify the FINAL resampled path, not only the grid nodes: replacing the
+        # endpoints with the original S/G can put samples back inside an obstacle,
+        # and resampling can cut a corner.
+        path_verified, blocked_samples = self._verify_path(occ, path)
+        valid = bool(check["valid"]) and path_verified and not endpoint_projected
+        if not check["valid"]:
+            reason = check.get("reason", "")
+        elif not path_verified:
+            reason = "resampled_path_blocked:%d" % blocked_samples
+        elif endpoint_projected:
+            reason = "endpoint_projected"
+        else:
+            reason = ""
+
         out = {
             "status": status,
             "fallback": fallback,
@@ -171,15 +191,35 @@ class GuidanceFieldSearch:
             "path_nodes": nodes,
             "sources": int(len(sources["positions_rc"])),
             "expanded": int(expanded),
-            "valid": bool(check["valid"]),
-            "valid_reason": check.get("reason", ""),
+            "valid": valid,
+            "valid_reason": reason,
             "start_cell": start_cell,
             "goal_cell": goal_cell,
+            "endpoint_projected": endpoint_projected,
+            "path_verified": bool(path_verified),
+            "blocked_samples": int(blocked_samples),
         }
         if return_debug:
             out["debug"] = debug
         return out
 
+
+    def _verify_path(self, occ: np.ndarray, path_xy: np.ndarray):
+        """Every resampled path sample must lie on a free cell of the safe map.
+
+        Returns ``(ok, blocked_sample_count)``.  This is the check that was
+        missing in the first version: the grid nodes were validated, then the
+        endpoints were overwritten with the raw S/G and the path resampled, with
+        no re-validation of the final geometry.
+        """
+        cells = np.rint(self.world_to_cell(path_xy)).astype(int)
+        height, width = occ.shape
+        outside = ((cells[:, 0] < 0) | (cells[:, 0] >= height)
+                   | (cells[:, 1] < 0) | (cells[:, 1] >= width))
+        blocked = np.ones(len(cells), dtype=bool)
+        inside = ~outside
+        blocked[inside] = occ[cells[inside, 0], cells[inside, 1]] > 0
+        return (not bool(blocked.any())), int(blocked.sum())
 
 class _Cfg:
     """Minimal ``Config`` stand-in for the upstream source builders."""

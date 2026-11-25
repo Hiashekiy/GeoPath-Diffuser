@@ -121,6 +121,7 @@ sampling:
   alm_before_ddim_update: true
   steps: 50                          # 20/50/100 to be compared, never 4
   seed: 0
+  heading_tol_deg: 20.0              # final acceptance tolerance on the start/goal tangent
 
 training:
   epochs: 1

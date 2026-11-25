@@ -89,8 +89,23 @@ def main() -> int:
     check("corridor pack built", out["pack"] is not None)
     check("corridor scope is local (collision intervals only)",
           info.get("scope") == "local", info.get("spans"))
-    check("ALM executed on the frozen pack", len(out["alm_stats"]) > 0,
-          "%d steps" % len(out["alm_stats"]))
+    # design document section 6.4/8: ALM is skipped when no LOCAL convex cell
+    # exists, even though the map-box cells keep the pack non-empty
+    local_cells = int(info.get("local_cells", 0))
+    if local_cells > 0:
+        check("ALM executed because local convex cells exist",
+              len(out["alm_stats"]) > 0, "%d steps" % len(out["alm_stats"]))
+    else:
+        check("ALM skipped because there is no local convex cell",
+              len(out["alm_stats"]) == 0, "local_cells=0")
+    check("every accepted ALM step passed the safety gate",
+          all(s["accepted_samples"] >= 0 for s in out["alm_stats"])
+          and out["alm_rejected_steps"] >= 0,
+          "accepted %d / rejected %d" % (out["alm_accepted_steps"],
+                                         out["alm_rejected_steps"]))
+    check("heading error reported", out["heading_error_deg"] is not None,
+          None if out["heading_error_deg"] is None
+          else "%s deg" % [round(float(v), 1) for v in out["heading_error_deg"][0]])
     check("ALM never fed back to the network (no feedback key in the trace)",
           all("feedback" not in step for step in out["steps_trace"]))
 

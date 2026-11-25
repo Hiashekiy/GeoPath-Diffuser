@@ -56,8 +56,18 @@ def run_mode(pipe, dataset, indices, cfg, mode: str, steps: int, seed: int) -> d
         traj_m = out["trajectory_m"][0].detach().cpu().numpy()
         metrics = trajectory_metrics(traj_m, occupancy[b, 0].numpy(),
                                      sdf[b, 0].numpy(), res_m)
+        # local (obstacle) constraints only: the map-box cells would always be
+        # satisfied and would hide the actual corridor violation
         metrics["corridor_violation_m"] = corridor_violation_m(
-            traj_m, out["pack"], scene_scale)
+            traj_m, out.get("pack_local"), scene_scale)
+        metrics["alm_accepted_steps"] = int(out.get("alm_accepted_steps", 0))
+        metrics["alm_rejected_steps"] = int(out.get("alm_rejected_steps", 0))
+        metrics["search_failed"] = bool(out["search_failed"][0])
+        if out.get("heading_error_deg") is not None:
+            metrics["heading_error_max_deg"] = float(
+                out["heading_error_deg"].max().item())
+        else:
+            metrics["heading_error_max_deg"] = float("nan")
         metrics["inference_s"] = elapsed
         metrics["index"] = int(indices[b])
         metrics["search_status"] = (out["search_stats"][0]["status"]
@@ -111,12 +121,14 @@ def main() -> int:
                                  "rows": result["rows"],
                                  "timing": result["timing"]}
         agg = result["aggregate"]
-        print("   collision_rate=%.4f success=%.2f min_clearance=%.3f m "
-              "length=%.2f m mean_curv=%.4f corridor_viol=%.4f m"
+        print("   collision_rate=%.4f success=%.2f heading_err=%.1f deg "
+              "corridor_viol=%.4f m alm=%d steps (acc %d / rej %d)"
               % (agg.get("collision_rate", 0.0), agg.get("success_rate", 0.0),
-                 agg.get("min_clearance_m", 0.0), agg.get("length_m", 0.0),
-                 agg.get("mean_curvature", 0.0),
-                 agg.get("corridor_violation_m", 0.0)))
+                 agg.get("heading_error_max_deg", float("nan")),
+                 agg.get("corridor_violation_m", 0.0),
+                 float(np.mean([r["alm_steps"] for r in rows])) if rows else 0.0,
+                 int(agg.get("alm_accepted_steps", 0)),
+                 int(agg.get("alm_rejected_steps", 0))))
         for out, sample in result["outputs"]:
             idx = int(sample.get("index", 0))
             name = "%s_%03d_%02d.png" % (mode, idx, opts.steps)
@@ -131,18 +143,20 @@ def main() -> int:
         json.dump(report, fh, indent=2, default=float)
 
     lines = ["# Inference report (%s split, %d steps)" % (opts.split, opts.steps), "",
-             "| mode | collision rate | success | min clearance (m) | length (m) | "
-             "mean curvature | corridor violation (m) | ALM steps | inference (s) |",
+             "| mode | collision rate | success | heading err (deg) | corridor viol (m) | "
+             "ALM steps | ALM accepted/rejected | search failed | inference (s) |",
              "|---|---|---|---|---|---|---|---|---|"]
     for mode in modes:
         agg = report["modes"][mode]["aggregate"]
         rows = report["modes"][mode]["rows"]
-        lines.append("| %s | %.4f | %.2f | %.3f | %.2f | %.4f | %.4f | %.1f | %.2f |"
+        lines.append("| %s | %.4f | %.2f | %.1f | %.4f | %.1f | %d/%d | %d | %.2f |"
                      % (mode, agg.get("collision_rate", 0.0), agg.get("success_rate", 0.0),
-                        agg.get("min_clearance_m", 0.0), agg.get("length_m", 0.0),
-                        agg.get("mean_curvature", 0.0),
+                        agg.get("heading_error_max_deg", float("nan")),
                         agg.get("corridor_violation_m", 0.0),
                         float(np.mean([r["alm_steps"] for r in rows])) if rows else 0.0,
+                        int(agg.get("alm_accepted_steps", 0)),
+                        int(agg.get("alm_rejected_steps", 0)),
+                        int(np.sum([1 for r in rows if r.get("search_failed")])),
                         agg.get("inference_s", 0.0)))
     md_path = os.path.join(PROJECT_ROOT, "outputs", "reports", "inference_report.md")
     with open(md_path, "w", encoding="utf-8") as fh:

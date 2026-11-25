@@ -58,8 +58,10 @@ frozen=True  rays=16  d_clip=8.0  a∈[0.15,6.0]  b_min=0.05  ray_margin=0.01
 
 ```
 $ python -m pytest tests -q
-56 passed in 25.70s
+80 passed, 1 skipped in 107.28s
 ```
+
+（skip 的是 `tests/test_cuda_device.py`：本机 `torch 2.14.0+cpu`，CUDA 用例只在有 GPU 的机器上执行。）
 
 | 测试文件 | 覆盖的验收点 |
 |---|---|
@@ -70,6 +72,8 @@ $ python -m pytest tests -q
 | `test_guidance_search.py` (5) | 搜索路径 128 点、端点精确、全部落在自由格；直线弧长重采样间距均匀（相对标准差 <1e-4）；引导源全在障碍内仍能出可行路径；无通路时返回 None；两个洞时路径跟随引导走廊（穿越点距引导口 <3 m） |
 | `test_safety_geometry.py` (7) | 64 椭圆 + `[cx,cy,a,b,cos2θ,sin2θ]`；`cos2θ/sin2θ` 单位化；轴长在上游界限内且 `b≤a`；查询点首尾等于路径首尾；无碰撞 → 只有 64 个 box cell（4 面）；碰撞曲线 → 产生 ≥`min_queries` 的查询跨度；pack 面掩码与单位法向；padding 行 `b=+inf` 不生效；`SceneTransform` 往返一致且格心映射到 `grid_sample` 坐标 |
 | `test_alm.py` (7) | ALM 降最大违反量；端点保持；返回对偶且可继承（warm start 后有限且不增）；全掩码 pack 为 no-op（`q_safe==q`，`lam=0`）；**追加 7 行 padding 不改变修正结果**；密集验证能识别碰撞（0 → 1）；单样本与 2 样本 pack 一致 |
+| `test_review_regressions.py` (24) | 详见 `docs/code_review_verification.md` §0：P0-1..P1-7、P2-1、P2-3 每条缺陷的修复验收 |
+| `test_cuda_device.py` (1, skip) | codec / heading / pack 跟随设备（需 CUDA 机器） |
 | `test_inference_pipeline.py` (9) | 一次运行只编码一次地图；安全几何只生成一次（`search` 1 次、椭圆网络 1 次）；**所有引导步共用同一个 pack 对象**；网络从不接收 `feedback/history/delta/correction`；`safety_condition` 对象跨步稳定；`map_only` 模式无安全条件/无 ALM；输出有限、端点精确；`steps` 可配 |
 
 ## 4. 端到端最小验证
@@ -121,9 +125,17 @@ corridor failure reasons: {'bridge_failed': 3}
 
 凸单元尺寸实测（val 6 个场景，64 单元/场景）：面积中位数 **30.6–156.3 m²**、`bounded` 合法率 **100 %**；对照上游 `results/figures/grid/summary.json` 的 `area_p50_m2 = 103.8` 与 `corridor_success_rate = 0.542`。
 
-即：凸单元几何与上游同量级，走廊闭环率（≈50 %）也与上游自身水平（54 %）一致。椭圆偏薄（`b` 中位数 0.13 m）是冻结网络在合成地图上的域偏移，未做任何补偿（不放大椭圆、不改 PathSafe 输出）。未闭环的样本退化为"仅地图边界 box cell"，ALM 自动 no-op。
+即：凸单元几何与上游同量级，走廊闭环率（≈50 %）也与上游自身水平（54 %）一致。椭圆偏薄（`b` 中位数 0.13 m）是冻结网络在合成地图上的域偏移，未做任何补偿（不放大椭圆、不改 PathSafe 输出）。未闭环的样本退化为「仅地图边界 box cell」；ALM **不会**自动跳过（见下方更正）。
 
-## 7. 双路联合训练（烟测，不是正式训练）
+> **更正（代码复审后）**：本报告此前写作「ALM 自动 no-op（`pack.piece_mask` 全 False）」，这是**错的**。`build_region_table()` 在没有任何局部凸单元时仍为 64 个查询点生成地图边界 box cell，`piece_mask` 并非全 False，ALM 仍会执行（实测：`local_cells = 0` 时 ALM 仍跑 5 步）。实测证据见 `docs/code_review_verification.md` 的 P1-2。
+
+## 7. 双路联合训练（历史记录：本轮修复未训练）
+
+> **状态说明（代码复审后）**：本节数字来自修复**之前**的一次 16 步烟测。
+> 复审意见是"先修 P0/P1，再谈训练"，因此本轮修复过程**没有**执行任何训练命令；
+> 那次误跑的产物（`outputs/checkpoints/toy.pt`、`last.pt`、`training_curves.png`）
+> 已删除。下表仅作为"双路联合训练能跑通"的历史证据保留，不再代表当前代码，
+> 也不能用于任何精度结论。正式训练待复审通过后再安排。
 
 ```
 $ python scripts/train_dual_branch.py --steps 60 --epochs 4 --batch-size 4 --size 16 \
@@ -137,7 +149,14 @@ epoch 4 step 16 | loss 0.56640 (u 0.17710 c 0.17688 align 0.00000 col 0.17374 co
 * `align` 在初始阶段接近 0（输出头零初始化 → 两分支同值），随训练才分化；这是预期行为，不是未实现。
 * **仅 16 步，模型远未收敛，任何精度结论都不成立**。按你的要求没有启动长时间训练。
 
-## 8. 推理三配置对照（同一 toy checkpoint）
+## 8. 推理三配置对照（历史记录，数字已作废）
+
+> **状态说明（代码复审后）**：下表由已删除的 toy checkpoint 产生，且修复前
+> `collision_loss` 单位错误、ALM 无门控、碰撞检测只查点、碰撞区间用索引映射，
+> 因此**这些数字全部作废**，不能引用。修复后的推理脚本已扩展为报告
+> 朝向误差与 ALM 接受/拒绝步数（`scripts/run_inference.py`），
+> 但按"先复审、再训练/评测"的顺序，本轮没有重新生成对照表。
+> 复现命令已写在 README §3.4；重新生成时请一并更新本节。
 
 ```
 $ python scripts/run_inference.py --samples 3 --steps 10 --checkpoint outputs/checkpoints/toy.pt

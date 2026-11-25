@@ -49,19 +49,25 @@ def sample_sdf(sdf: np.ndarray, points_m: np.ndarray, res_m: float) -> np.ndarra
 
 def trajectory_metrics(points_m: np.ndarray, occupancy: np.ndarray, sdf: np.ndarray,
                        res_m: float, step_m: float = 0.05) -> Dict[str, float]:
-    """Collision rate, clearance, length, smoothness of one trajectory."""
+    """Collision rate, clearance, length, smoothness of one trajectory.
+
+    The collision rate is computed with the SEGMENT sweep
+    (``safety.collision_query.curve_collision_intervals``) on a 0.05 m densified
+    curve: a point-only test misses a 0.25 m wall between two samples, which is
+    exactly the defect P1-1 of the code review.
+    """
+    from ..frames import SceneTransform
+    from ..safety.collision_query import curve_collision_intervals
+
     pts = np.asarray(points_m, dtype=np.float64).reshape(-1, 2)
     dense = dense_points(pts, step_m)
     occ = np.asarray(occupancy)
     if occ.ndim == 3:
         occ = occ[0]
-    height, width = occ.shape
-    rows = np.rint(dense[:, 1] / res_m).astype(int)
-    cols = np.rint(dense[:, 0] / res_m).astype(int)
-    outside = (rows < 0) | (rows >= height) | (cols < 0) | (cols >= width)
-    blocked = np.ones(len(dense), dtype=bool)
-    inside = ~outside
-    blocked[inside] = occ[rows[inside], cols[inside]] > 0.5
+    grid = int(occ.shape[-1])
+    transform = SceneTransform(float(grid) * float(res_m), grid)
+    sweep = curve_collision_intervals(occ, transform.to_scene(dense))
+    blocked = np.zeros(len(dense), dtype=bool)
     clearance = sample_sdf(sdf, dense, res_m)
 
     seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
@@ -82,8 +88,9 @@ def trajectory_metrics(points_m: np.ndarray, occupancy: np.ndarray, sdf: np.ndar
     else:
         curvature = np.zeros(0)
     return {
-        "collision_rate": float(blocked.mean()),
-        "collision_free": bool(not blocked.any()),
+        "collision_rate": float(sweep["collision_fraction"]),
+        "collision_free": bool(sweep["collision_fraction"] <= 1e-9),
+        "collision_intervals": int(len(sweep["intervals"])),
         "min_clearance_m": float(clearance.min()),
         "mean_clearance_m": float(clearance.mean()),
         "length_m": length,

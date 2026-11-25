@@ -1,15 +1,23 @@
 """Local convex safety regions and the frozen B-spline constraint pack.
 
-Design document sections 6.4 / 7.4: ellipses are generated along the whole
-path, but the expensive convex-region construction runs ONLY in the collision
-intervals of the current trajectory (plus ``pad_queries`` on each side, at least
+Design document sections 6.4 / 7.4: ellipses are generated along the whole path,
+but the expensive convex-region construction runs ONLY in the collision intervals
+of the current trajectory (plus ``pad_queries`` on each side, at least
 ``min_queries`` wide).  Everywhere else the corridor keeps an unconstrained
-"stay inside the map" box cell, which costs four halfspaces and cannot drag the
-curve anywhere.
+"stay inside the map" box cell (four halfspaces, cannot drag the curve).
 
-The construction itself is the migrated upstream code, used unchanged:
-``EllipseRegionBuilder.build_from_ellipse`` -> ``build_safety_corridor``
-(overlap check + point-seeded bridge) -> ``build_constraint_pack_from_regions``.
+Fixes applied after the code review (see ``docs/code_review_verification.md``):
+
+* **P0-3** the region table has ``len(cells)`` rows, not ``Q``: bridge cells are
+  never truncated;
+* **P0-4** tables are packed per sample and merged with padding, so each sample
+  keeps its own anchors;
+* **P1-1** collision intervals come from a SEGMENT-level sweep, not from
+  point samples (``safety/collision_query.py``);
+* **P1-6** the intervals are projected onto the searched path, so the query index
+  follows the real geometry instead of a curve-index ratio;
+* **P1-7** spans dropped by ``max_spans`` are counted and reported;
+* box cells are flagged, so the training corridor loss can ignore them.
 """
 from __future__ import annotations
 
@@ -18,19 +26,25 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
+from .collision_query import collision_spans_on_path, curve_collision_intervals
 from .convex_region import EllipseRegionBuilder
+from .pack_utils import merge_packs
 from .safety_corridor import build_safety_corridor
 
 __all__ = ["collision_mask", "collision_intervals", "build_region_table",
-           "build_local_constraint_pack", "box_cell_faces", "pad_region_tables"]
+           "build_local_constraint_pack", "box_cell_faces", "pad_region_tables",
+           "pack_from_tables"]
 
 
+# --------------------------------------------------------------------------- #
+# legacy point-sampled statistics (kept for diagnostics / tests)
+# --------------------------------------------------------------------------- #
 def collision_mask(occupancy, curve, outside_is_blocked: bool = True
                    ) -> Tuple[np.ndarray, np.ndarray]:
     """Discrete collision per dense curve point (both in scene coordinates).
 
-    Copied from TrajSafe-Diffuser ``src/diffusion/alm_local.py``: a verification
-    statistic, never a projection.
+    Kept as a cheap diagnostic.  The authoritative collision test used for the
+    safety geometry is the SEGMENT sweep in :mod:`collision_query`.
     """
     occ = (occupancy.detach().cpu().numpy() if torch.is_tensor(occupancy)
            else np.asarray(occupancy))
@@ -52,10 +66,11 @@ def collision_mask(occupancy, curve, outside_is_blocked: bool = True
 
 def collision_intervals(hit: np.ndarray, pad: int = 4, min_q: int = 8,
                         n_query: int = 64) -> List[Tuple[int, int]]:
-    """Contiguous collision runs mapped to ellipse-query index spans.
+    """Legacy index-ratio mapping (kept for the unit tests of the padding rule).
 
-    Same padding / minimum-width rule as the reference sampler
-    (``src/diffusion/alm_local.py``).
+    ``collision_spans_on_path`` is what the pipeline uses; this one assumes the
+    curve parameter progress equals the path arc-length progress, which is only
+    true when both are the same polyline.
     """
     idx = np.flatnonzero(hit)
     if len(idx) == 0:
@@ -107,24 +122,32 @@ def box_cell_faces(margin: float = 0.0) -> Tuple[np.ndarray, np.ndarray]:
     return A, b
 
 
+# --------------------------------------------------------------------------- #
+# region table
+# --------------------------------------------------------------------------- #
 def build_region_table(occupancy_scene: torch.Tensor,
                        centers_scene: torch.Tensor,
-                       shape4: torch.Tensor,
+                       shape4_scene: torch.Tensor,
                        anchors: torch.Tensor,
                        curve_scene: Optional[torch.Tensor] = None,
                        gamma_scene: Optional[torch.Tensor] = None,
                        config: Optional[dict] = None,
-                       scope: str = "local"):
+                       scope: str = "local",
+                       scene_scale: float = 32.0,
+                       spans: Optional[List[Tuple[int, int]]] = None) -> Tuple[Dict, Dict]:
     """Padded half-space table ``A x <= b`` for one sample.
 
-    ``scope="local"`` builds local convex regions only inside the collision
-    intervals of ``curve_scene`` (inference, design document section 6.4).
-    ``scope="full"`` builds one region per ellipse (offline training cache: the
-    GT curve is collision-free by construction, so a local scope would produce
-    an empty constraint set and a dead safety loss).
+    Every argument is in the normalised scene frame -- in particular
+    ``shape4_scene`` is ``[log a_s, log b_s, cos2t, sin2t]`` with the axes already
+    divided by ``scene_scale`` (see ``safety_features.ellipse_shape4_to_scene``).
 
-    Returns ``(table, info)`` with ``table = {"cell_A": [R,F,2], "cell_b": [R,F],
-    "cell_mask": [R], "anchors": [R]}``.
+    ``scope="local"`` builds convex regions only inside the collision intervals of
+    ``curve_scene``, projected onto ``gamma_scene`` (the searched path).
+    ``scope="full"`` builds one region per ellipse (offline training cache).
+
+    Returns ``(table, info)``; ``table`` holds ``cell_A [R,F,2]``,
+    ``cell_b [R,F]``, ``cell_mask [R]``, ``cell_is_box [R]``, ``anchors [R]``
+    with ``R = len(cells) = Q + bridge cells``.
     """
     cfg = dict(config or {})
     region_cfg = dict(cfg.get("region") or {})
@@ -134,31 +157,60 @@ def build_region_table(occupancy_scene: torch.Tensor,
     max_spans = int(local_cfg.get("max_spans", 3))
 
     centers_scene = torch.as_tensor(centers_scene, dtype=torch.float32)
-    shape4 = torch.as_tensor(shape4, dtype=torch.float32)
+    shape4_scene = torch.as_tensor(shape4_scene, dtype=torch.float32)
     anchors = torch.as_tensor(anchors, dtype=torch.float64).reshape(-1)
     Q = int(anchors.numel())
 
     info: Dict = {"scope": scope, "spans": [], "local_cells": 0, "box_cells": 0,
                   "corridor_valid": [], "corridor_failure": [], "bridges": 0,
-                  "collision_fraction": 0.0}
+                  "collision_fraction": 0.0, "collision_intervals": 0,
+                  "collision_length_m": 0.0, "dropped_spans": 0,
+                  "dropped_length_m": 0.0, "num_rows": 0}
 
-    if scope == "full":
-        spans = [(0, Q - 1)]
+    if spans is not None:
+        span_list = [tuple(int(v) for v in s) for s in spans]
+    elif scope == "full":
+        span_list = [(0, Q - 1)]
     else:
-        if curve_scene is None:
-            spans = []
-        else:
-            hit, _ = collision_mask(occupancy_scene, curve_scene)
-            info["collision_fraction"] = float(hit.mean()) if len(hit) else 0.0
-            spans = collision_intervals(hit, pad=pad, min_q=min_q, n_query=Q)[:max_spans]
-    info["spans"] = [list(s) for s in spans]
+        span_list = []
+        if curve_scene is not None and gamma_scene is not None:
+            query = collision_spans_on_path(
+                occupancy_scene, torch.as_tensor(curve_scene).detach().cpu().numpy(),
+                torch.as_tensor(gamma_scene).detach().cpu().numpy(), Q,
+                pad=pad, min_q=min_q, max_spans=max_spans,
+                scene_scale=float(scene_scale), min_penetration_m=0.0)
+            span_list = list(query["spans"])
+            info.update({
+                "collision_fraction": float(query["collision_fraction"]),
+                "collision_intervals": int(query["n_intervals"]),
+                "collision_length_m": float(query["collision_length_m"]),
+                "dropped_spans": int(query["dropped_spans"]),
+                "dropped_length_m": float(query["dropped_length_m"]),
+            })
+        elif curve_scene is not None:
+            # no path to project onto: fall back to the exact segment sweep and
+            # the legacy index mapping, and say so
+            sweep = curve_collision_intervals(occupancy_scene, curve_scene)
+            info["collision_fraction"] = float(sweep["collision_fraction"])
+            info["collision_intervals"] = len(sweep["intervals"])
+            info["collision_length_m"] = float(sweep["collision_length"]) * float(scene_scale)
+            info["fallback"] = "index_mapping_no_path"
+            spans_idx = []
+            for iv in sweep["intervals"]:
+                a = int(np.floor(iv["u_in"] * (Q - 1))) - pad
+                b = int(np.ceil(iv["u_out"] * (Q - 1))) + pad
+                spans_idx.append((max(0, a), min(Q - 1, b)))
+            span_list = _merge_spans(spans_idx)
+    info["spans"] = [list(s) for s in span_list]
 
-    cells: List[Tuple[float, np.ndarray, np.ndarray]] = []
-    if spans:
+    cells: List[Tuple[float, np.ndarray, np.ndarray, bool]] = []
+    if span_list:
         builder = EllipseRegionBuilder(occupancy_scene.float(), region_cfg)
-        for a, b in spans:
+        for a, b in span_list:
+            a = max(0, int(a))
+            b = min(Q - 1, int(b))
             corridor = build_safety_corridor(
-                builder, centers_scene[a:b + 1], shape4[a:b + 1],
+                builder, centers_scene[a:b + 1], shape4_scene[a:b + 1],
                 anchors[a:b + 1], gamma=gamma_scene,
                 gamma_lengths=(int(gamma_scene.shape[0]) if gamma_scene is not None else None),
                 config=cfg)
@@ -170,96 +222,107 @@ def build_region_table(occupancy_scene: torch.Tensor,
             for cell in corridor.cells:
                 cells.append((float(cell.anchor_s),
                               np.asarray(cell.A, dtype=np.float64),
-                              np.asarray(cell.b, dtype=np.float64)))
+                              np.asarray(cell.b, dtype=np.float64),
+                              False))     # False = not a map-box cell
         info["local_cells"] = len(cells)
 
-    covered = [anchor for anchor, _, _ in cells]
+    covered = [anchor for anchor, _, _, _ in cells]
     margin = float(region_cfg.get("map_boundary_margin",
-                                 region_cfg.get("safety_margin", 0.02)))
+                                  region_cfg.get("safety_margin", 0.02)))
     box_A, box_b = box_cell_faces(margin)
     for i in range(Q):
         s = float(anchors[i])
         if any(abs(s - c) < 1e-9 for c in covered):
             continue
-        cells.append((s, box_A, box_b))
-    info["box_cells"] = Q - info["local_cells"]
+        cells.append((s, box_A, box_b, True))    # True = map-box cell
+    info["box_cells"] = int(sum(1 for c in cells if c[3]))
 
     cells.sort(key=lambda item: item[0])
-    max_faces = max(len(b) for _, _, b in cells)
-    cell_A = np.zeros((Q, max_faces, 2), dtype=np.float64)
-    cell_b = np.full((Q, max_faces), np.inf, dtype=np.float64)
-    cell_mask = np.zeros(Q, dtype=bool)
-    cell_anchors = np.zeros(Q, dtype=np.float64)
-    for i, (s, A, b) in enumerate(cells[:Q]):
+    rows = len(cells)
+    max_faces = max(len(item[2]) for item in cells)
+    cell_A = np.zeros((rows, max_faces, 2), dtype=np.float64)
+    cell_b = np.full((rows, max_faces), np.inf, dtype=np.float64)
+    cell_mask = np.zeros(rows, dtype=bool)
+    cell_is_box = np.zeros(rows, dtype=bool)
+    cell_anchors = np.zeros(rows, dtype=np.float64)
+    for i, (s, A, b, is_box) in enumerate(cells):
         cell_A[i, :len(b)] = A
         cell_b[i, :len(b)] = b
         cell_mask[i] = True
         cell_anchors[i] = s
+        cell_is_box[i] = bool(is_box)
 
+    info["num_rows"] = int(rows)
     table = {"cell_A": cell_A, "cell_b": cell_b, "cell_mask": cell_mask,
-             "anchors": cell_anchors}
+             "cell_is_box": cell_is_box, "anchors": cell_anchors}
     return table, info
+
+
+# --------------------------------------------------------------------------- #
+# packs
+# --------------------------------------------------------------------------- #
+def pack_from_tables(codec, tables: List[Dict], margin: float = 0.0,
+                     include_box: bool = True, device=None):
+    """One batched pack from per-sample tables (each keeps its own anchors)."""
+    from .bspline_constraints import build_constraint_pack_from_regions
+
+    packs = []
+    for table in tables:
+        mask = np.asarray(table["cell_mask"], dtype=bool).copy()
+        if not include_box and "cell_is_box" in table:
+            mask &= ~np.asarray(table["cell_is_box"], dtype=bool)
+        if not mask.any():
+            packs.append(None)
+            continue
+        packs.append(build_constraint_pack_from_regions(
+            codec,
+            cell_A=torch.as_tensor(table["cell_A"])[None],
+            cell_b=torch.as_tensor(table["cell_b"])[None],
+            cell_mask=torch.as_tensor(mask)[None],
+            anchors=np.asarray(table["anchors"], dtype=np.float64),
+            margin=float(margin),
+            dtype=torch.float32,
+            device=device))
+    return merge_packs(packs, codec.num_controls, device=device)
 
 
 def build_local_constraint_pack(codec, occupancy_scene: torch.Tensor,
                                 centers_scene: torch.Tensor,
-                                shape4: torch.Tensor,
+                                shape4_scene: torch.Tensor,
                                 anchors: torch.Tensor,
                                 curve_scene: torch.Tensor,
                                 gamma_scene: Optional[torch.Tensor] = None,
                                 config: Optional[dict] = None,
                                 margin: float = 0.0,
-                                scope: str = "local"):
+                                scope: str = "local",
+                                scene_scale: float = 32.0,
+                                include_box: bool = True):
     """Table -> frozen :class:`BSplineConstraintPack` for ONE sample."""
-    from .bspline_constraints import build_constraint_pack_from_regions
-
-    table, info = build_region_table(occupancy_scene, centers_scene, shape4,
-                                     anchors, curve_scene, gamma_scene,
-                                     config, scope=scope)
-    return pack_from_tables(codec, [table], margin=margin), info
-
-
-def pack_from_tables(codec, tables: List[Dict], margin: float = 0.0):
-    """Build ONE batched pack from per-sample tables (pad faces with ``A=0, b=inf``)."""
-    from .bspline_constraints import build_constraint_pack_from_regions
-
-    max_faces = max(t["cell_A"].shape[1] for t in tables)
-    batch = len(tables)
-    R = tables[0]["cell_A"].shape[0]
-    cell_A = np.zeros((batch, R, max_faces, 2), dtype=np.float64)
-    cell_b = np.full((batch, R, max_faces), np.inf, dtype=np.float64)
-    cell_mask = np.zeros((batch, R), dtype=bool)
-    anchors = np.zeros(R, dtype=np.float64)
-    for i, table in enumerate(tables):
-        faces = table["cell_A"].shape[1]
-        cell_A[i, :, :faces] = table["cell_A"]
-        cell_b[i, :, :faces] = table["cell_b"]
-        cell_mask[i] = table["cell_mask"]
-        anchors = np.asarray(table["anchors"], dtype=np.float64)
-    return build_constraint_pack_from_regions(
-        codec,
-        cell_A=torch.as_tensor(cell_A),
-        cell_b=torch.as_tensor(cell_b),
-        cell_mask=torch.as_tensor(cell_mask),
-        anchors=anchors,
-        margin=float(margin),
-        dtype=torch.float32)
+    table, info = build_region_table(occupancy_scene, centers_scene, shape4_scene,
+                                     anchors, curve_scene, gamma_scene, config,
+                                     scope=scope, scene_scale=scene_scale)
+    return pack_from_tables(codec, [table], margin=margin,
+                            include_box=include_box), info
 
 
 def pad_region_tables(tables: List[Dict]) -> Dict[str, torch.Tensor]:
-    """Stack per-sample tables into batch tensors (faces padded with ``b=+inf``)."""
+    """Stack per-sample tables into batch tensors (rows/faces padded, never used)."""
+    max_rows = max(t["cell_A"].shape[0] for t in tables)
     max_faces = max(t["cell_A"].shape[1] for t in tables)
     batch = len(tables)
-    R = tables[0]["cell_A"].shape[0]
-    cell_A = torch.zeros(batch, R, max_faces, 2, dtype=torch.float64)
-    cell_b = torch.full((batch, R, max_faces), float("inf"), dtype=torch.float64)
-    cell_mask = torch.zeros(batch, R, dtype=torch.bool)
-    anchors = torch.zeros(batch, R, dtype=torch.float64)
+    cell_A = torch.zeros(batch, max_rows, max_faces, 2, dtype=torch.float64)
+    cell_b = torch.full((batch, max_rows, max_faces), float("inf"), dtype=torch.float64)
+    cell_mask = torch.zeros(batch, max_rows, dtype=torch.bool)
+    cell_is_box = torch.zeros(batch, max_rows, dtype=torch.bool)
+    anchors = torch.zeros(batch, max_rows, dtype=torch.float64)
     for i, table in enumerate(tables):
+        rows = table["cell_A"].shape[0]
         faces = table["cell_A"].shape[1]
-        cell_A[i, :, :faces] = torch.as_tensor(table["cell_A"])
-        cell_b[i, :, :faces] = torch.as_tensor(table["cell_b"])
-        cell_mask[i] = torch.as_tensor(table["cell_mask"]).bool()
-        anchors[i] = torch.as_tensor(table["anchors"])
+        cell_A[i, :rows, :faces] = torch.as_tensor(table["cell_A"])
+        cell_b[i, :rows, :faces] = torch.as_tensor(table["cell_b"])
+        cell_mask[i, :rows] = torch.as_tensor(table["cell_mask"]).bool()
+        if "cell_is_box" in table:
+            cell_is_box[i, :rows] = torch.as_tensor(table["cell_is_box"]).bool()
+        anchors[i, :rows] = torch.as_tensor(table["anchors"])
     return {"cell_A": cell_A, "cell_b": cell_b, "cell_mask": cell_mask,
-            "anchors": anchors}
+            "cell_is_box": cell_is_box, "anchors": anchors}

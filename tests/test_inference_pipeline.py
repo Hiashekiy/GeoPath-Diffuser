@@ -68,8 +68,10 @@ def test_search_and_ellipses_are_never_recomputed(pipeline, sample, monkeypatch)
     assert gen_calls["n"] == 1, "the ellipse network must run exactly once"
 
 
-def test_same_pack_is_reused_by_every_guided_step(pipeline, sample, monkeypatch):
-    item, _ = sample
+def test_same_pack_is_reused_by_every_guided_step(pipeline, cfg, monkeypatch):
+    """Test scene 2 has local convex cells, so the ALM actually runs."""
+    from gp_diffuser.training.dataset import SyntheticTrajectoryDataset
+    item = SyntheticTrajectoryDataset(cfg, "test")[2]
     occ, sdf, sg, hd, hv = _batch(item)
     seen = []
     original = sampler_mod.__dict__["pick_times"]   # touch the module for import
@@ -84,6 +86,7 @@ def test_same_pack_is_reused_by_every_guided_step(pipeline, sample, monkeypatch)
     monkeypatch.setattr(alm_mod, "bspline_alm_correct", spy)
     out = pipeline["sampler"].sample(occ, sdf, sg, heading=hd, heading_valid=hv,
                                      steps=10, seed=0)
+    assert int(out["corridor_info"]["local_cells"]) > 0, "scene 2 must have local cells"
     assert len(seen) >= 2, "ALM must run on several guided steps"
     assert len(set(seen)) == 1, "the frozen pack must be the same object every step"
 

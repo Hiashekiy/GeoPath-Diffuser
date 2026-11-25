@@ -33,6 +33,17 @@
 
 **未复制**（有意排除）：TrajSafe V5 网络（`src/models/trajsafe/planner_v5.py`、`planner.py`、`blocks.py`、`fusion.py`、`heads.py`、`feedback.py`、`boundary.py`、`encoders.py`）、`src/models/common/*`、`src/diffusion/sampler.py`、`sampler_v5.py`、`alm_guidance.py`（旧 waypoint ALM）、`sdf_guidance.py`、`carla_*`、`grid_search/*`（focal A*，本项目用 Astar-Diffusion）、`losses/losses.py`（V5 损失集合）；PathSafe 的 `train.py`/`evaluate.py`/`losses.py`/`polytopes.py`/`visualize*.py`；Astar 的 `scenes.py`/`trajectories.py`/`experiment.py`/`metrics.py`/`viz.py`/`cli.py`/`field-guided-search/`（同一算法的第二份打包）。
 
+## 1.1 新增（非迁移）的文件
+
+这些文件是评审后为修复缺陷新写的，**不含参考仓库代码**，因此不在迁移表内：
+
+| 新文件 | 作用 | 对应缺陷 |
+|---|---|---|
+| safety/collision_query.py | 线段级碰撞区间（Amanatides-Woo，复用迁移来的 	race_segment_cells）+ 碰撞位置到搜索路径的弧长投影 | P1-1 / P1-6 |
+| safety/pack_utils.py | 逐样本 BSplineConstraintPack 的 padding 合并、设备迁移 | P0-3 / P0-4 / P2-2 |
+| safety/psenet_inputs.py | LiDAR 射线重建（PathSafe 数据加载器不在仓库内） | — |
+| safety/local_regions.py、safety/safety_features.py、models/*、guidance/search.py、diffusion/sampler_conditional_dit.py、	raining/*、evaluation/* | 新项目自有模块（详见 README §2） | — |
+
 ## 2. 逐项适配明细
 
 ### 2.1 Astar-Diffusion → `gp_diffuser/guidance/`

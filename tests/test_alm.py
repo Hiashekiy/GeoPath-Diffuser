@@ -8,7 +8,7 @@ from gp_diffuser.diffusion.bspline_alm import bspline_alm_correct
 from gp_diffuser.safety.local_regions import build_region_table, pack_from_tables
 
 
-def _box_pack(codec, margin=0.0, valid=True):
+def _box_table(margin=0.0, valid=True):
     from gp_diffuser.safety.local_regions import box_cell_faces
     A, b = box_cell_faces(margin)
     cell_A = np.zeros((32, 4, 2))
@@ -18,9 +18,13 @@ def _box_pack(codec, margin=0.0, valid=True):
         cell_A[:] = A
         cell_b[:] = b
         mask[:] = True
-    table = {"cell_A": cell_A, "cell_b": cell_b, "cell_mask": mask,
-             "anchors": np.linspace(0.0, 1.0, 32)}
-    return pack_from_tables(codec, [table], margin=0.0)
+    return {"cell_A": cell_A, "cell_b": cell_b, "cell_mask": mask,
+            "cell_is_box": np.ones(32, dtype=bool),
+            "anchors": np.linspace(0.0, 1.0, 32)}
+
+
+def _box_pack(codec, margin=0.0, valid=True):
+    return pack_from_tables(codec, [_box_table(margin, valid)], margin=0.0)
 
 
 def test_alm_reduces_violation(pipeline):
@@ -67,8 +71,11 @@ def test_dual_variables_are_returned_for_inheritance(pipeline):
 
 
 def test_fully_masked_pack_is_a_no_op(pipeline):
+    """No cell -> no pack; an explicitly empty pack leaves the controls untouched."""
+    from gp_diffuser.safety.pack_utils import empty_pack
     codec = pipeline["codec"]
-    pack = _box_pack(codec, valid=False)
+    assert _box_pack(codec, valid=False) is None, "an all-masked table has no pack"
+    pack = empty_pack(codec.num_controls)
     q = torch.randn(1, 32, 2)
     q_safe, lam, stats = bspline_alm_correct(q, pack, codec,
                                              config=dict(pipeline["cfg"]["alm"]),
@@ -111,19 +118,18 @@ def test_padding_rows_are_ignored(pipeline):
 
 
 def test_dense_validation_catches_collisions(pipeline, sample):
-    from gp_diffuser.diffusion.sampler_conditional_dit import ConditionalDiTSampler
     item, _ = sample
     occ = item["occupancy"][None]
     good = item["path_gt_scene"][None]
     sampler = pipeline["sampler"]
-    assert sampler._collision_fraction(occ, good) == 0.0
+    assert float(sampler._collision_fractions(occ, good)[0]) == 0.0
     occ_np = item["occupancy"][0].numpy()
     blocked = np.argwhere(occ_np > 0.5)
     grid = occ_np.shape[-1]
     row, col = blocked[len(blocked) // 3]
     bad = torch.tensor([2.0 * col / grid - 1.0 + 1.0 / grid,
                         2.0 * row / grid - 1.0 + 1.0 / grid]).repeat(1, 128, 1)
-    assert sampler._collision_fraction(occ, bad) == 1.0
+    assert float(sampler._collision_fractions(occ, bad)[0]) == 1.0
 
 
 def test_pack_from_region_table_matches_batch_build(pipeline, sample, cfg):

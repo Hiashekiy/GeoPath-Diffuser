@@ -82,40 +82,61 @@ docs/                    reference_code_audit.md module_provenance.md design_rev
 outputs/                 figures/ reports/ cache/ checkpoints/（运行产物）
 ```
 
-## 3. 运行
+## 3. 安装与运行
+
+### 3.1 环境
 
 ```powershell
 # 解释器（本机默认 3.14 的 torch 是坏的，必须用 3.12）
 $py = "C:\Users\zz\AppData\Local\Programs\Python\Python312\python.exe"
 cd D:\ProjectDirectory\GeoPath-Diffuser
 
-# 1) 参考仓库审计（分支 / commit / 工作区 / checkpoint 形状）
-& $py scripts\audit_references.py
+& $py -m pip install torch numpy pyyaml matplotlib pytest
+& $py -m pip install scipy        # 可选；装上后引导场走 compiled sparse Dijkstra
+```
 
-# 2) 端到端最小验证（16 项检查 + 三联图）
+### 3.2 拉取三个只读参考仓库（必需，`references/` 被 git 忽略）
+
+```powershell
+& $py scripts\setup_references.py          # 克隆缺失的仓库（main / feature/v2.1-centerline / v4-map16-fbdelta-safeloss）
+& $py scripts\setup_references.py --check   # 仅校验：分支、工作区 clean、checkpoint 5,041,093 参数 + sha256
+```
+
+`setup_references.py` 退出码非 0 就说明参考环境不完整，后面所有命令都会因为缺
+`references/PathSafe-Ellipse/checkpoints/v3_best.pt` 而失败，**不要跳过这一步**。
+
+### 3.3 校验与测试
+
+```powershell
+& $py scripts\audit_references.py    # 分支 / commit / 工作区 / checkpoint 张量形状 / 特征形状
+& $py -m pytest tests -q              # 79 个用例
+```
+
+### 3.4 运行
+
+```powershell
+# 1) 端到端最小验证（18 项检查 + 三联图）
 & $py scripts\smoke_pipeline.py --steps 10
 
-# 3) B-spline 长路径拟合误差统计
+# 2) B-spline 长路径拟合误差统计
 & $py scripts\check_bspline_fit.py
 
-# 4) 生成训练用安全条件缓存（冻结模块离线跑）
+# 3) 生成训练用安全条件缓存（冻结模块离线跑；带指纹校验）
 & $py scripts\build_safety_cache.py --split train --size 16
 & $py scripts\build_safety_cache.py --split val   --size 4
 
-# 5) 双路联合训练（烟测；正式训练请自己加 epochs/数据量）
+# 4) 双路联合训练（烟测；正式训练请自己加 epochs/数据量）
 & $py scripts\train_dual_branch.py --steps 60 --epochs 4 --size 16 --save outputs/checkpoints/toy.pt
 
-# 6) 推理 + 三配置对照 + 出图
+# 5) 推理 + 三配置对照 + 出图（碰撞率 / 朝向误差 / 走廊违反 / ALM 接受-拒绝）
 & $py scripts\run_inference.py --samples 3 --steps 10 --checkpoint outputs/checkpoints/toy.pt
-
-# 7) 测试
-& $py -m pytest tests -q
 ```
 
-依赖：`torch`（CPU 即可）、`numpy`、`pyyaml`、`matplotlib`、`pytest`；`scipy` 可选（装上后引导场用 compiled sparse Dijkstra，凸多边形仍走两两面求交）。两个后端已验证等价（最大差 7.8e-16）。
+缓存文件（`outputs/cache/safety_*.npz`）带指纹（配置子集 + 数据集形状 + checkpoint
+大小/mtime 的 sha256）；换配置或换 checkpoint 后 `load_safety_cache` 会拒绝旧缓存并提示重建，
+不会静默用错数据。
 
 ## 4. 配置要点（`configs/default.yaml`）
-
 | 段 | 关键值 | 说明 |
 |---|---|---|
 | `map_encoder` | `checkpoint: references/PathSafe-Ellipse/checkpoints/v3_best.pt`，`freeze: true` | 架构从 checkpoint 内嵌 `cfg` 重建，不猜 YAML |
