@@ -58,7 +58,7 @@ frozen=True  rays=16  d_clip=8.0  a∈[0.15,6.0]  b_min=0.05  ray_margin=0.01
 
 ```
 $ python -m pytest tests -q
-80 passed, 1 skipped in 107.28s
+81 passed, 1 skipped in 108.60s
 ```
 
 （skip 的是 `tests/test_cuda_device.py`：本机 `torch 2.14.0+cpu`，CUDA 用例只在有 GPU 的机器上执行。）

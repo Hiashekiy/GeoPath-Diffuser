@@ -104,14 +104,14 @@
     "num_dense_samples": 898
   },
   "timing": {
-    "map_encode_s": 0.12618819999624975,
-    "initial_diffusion_s": 0.1942513000103645,
-    "search_s": 0.196820299999672,
-    "ellipse_s": 0.030007699999259785,
-    "corridor_s": 0.0006166999955894426,
-    "safety_total_s": 0.24022510000213515,
-    "guided_diffusion_s": 0.1364801999880001,
-    "final_validation_s": 0.0062246000015875325,
-    "total_s": 0.7048074000049382
+    "map_encode_s": 0.13405220001004636,
+    "initial_diffusion_s": 0.1952847000065958,
+    "search_s": 0.1841182999924058,
+    "ellipse_s": 0.038962299993727356,
+    "corridor_s": 0.0011175000108778477,
+    "safety_total_s": 0.241814399996656,
+    "guided_diffusion_s": 0.13891619998321403,
+    "final_validation_s": 0.008468500003800727,
+    "total_s": 0.7197157999908086
   }
 }

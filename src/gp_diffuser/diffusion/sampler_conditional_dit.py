@@ -483,7 +483,6 @@ class ConditionalDiTSampler:
             corridor_info = {
                 "local_cells": int(local_cells.sum().item()),
                 "spans": [i["spans"] for i in infos],
-                "dropped_spans": int(sum(i.get("dropped_spans", 0) for i in infos)),
                 "search_failed_samples": int(search_failed.sum().item()),
                 "batch": infos,
             }

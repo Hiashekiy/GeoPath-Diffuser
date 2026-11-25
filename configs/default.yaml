@@ -94,7 +94,6 @@ corridor:
   local:
     pad_queries: 4                   # corridor.local.pad_queries
     min_queries: 8                   # corridor.local.min_queries
-    max_spans: 3
   # Training cache scope.  "full" builds one region per ellipse for the offline
   # cache because the GT curve is collision-free by construction (a local scope
   # would yield an EMPTY constraint set and a dead L_corridor).  Inference always

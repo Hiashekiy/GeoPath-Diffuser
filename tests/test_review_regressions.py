@@ -265,6 +265,54 @@ def test_local_spans_follow_the_projected_position(pipeline, sample, cfg):
         assert a <= 32 <= b + 10
 
 
+def test_all_collision_intervals_are_used(cfg):
+    """P1-7: no cap on the number of collision intervals.
+
+    Four independent walls sit on one straight trajectory.  All four collision
+    intervals must be detected, projected onto the searched path as four disjoint
+    query spans, and each span must reach the convex-region builder -- nothing is
+    truncated (the old ``max_spans = 3`` dropped the fourth region).
+    """
+    from gp_diffuser.frames import SceneTransform
+    from gp_diffuser.safety.collision_query import collision_spans_on_path
+
+    grid, res_m = 128, 0.25
+    extent = grid * res_m                     # 32 m
+    transform = SceneTransform(extent, grid)
+    occ = np.zeros((grid, grid))
+    wall_cols = [24, 48, 72, 96]              # four separate walls
+    for col in wall_cols:
+        occ[40:88, col] = 1.0
+
+    xs = np.arange(2.0, 30.0, 0.35)
+    curve_m = np.stack([xs, np.full_like(xs, 16.0)], axis=-1)
+    curve_scene = transform.to_scene(curve_m)
+
+    info = collision_spans_on_path(occ, curve_scene, curve_scene, n_query=64,
+                                   pad=4, min_q=8, scene_scale=transform.scale)
+    assert info["n_intervals"] == 4, "four independent collision intervals expected"
+    assert len(info["spans"]) == 4, "no interval may be dropped"
+    for (a1, b1), (a2, b2) in zip(info["spans"], info["spans"][1:]):
+        assert b1 < a2, "the four spans must stay disjoint"
+
+    # every span must enter the convex-region builder (one attempt per span)
+    q = int(curve_scene.shape[0])
+    centers = torch.as_tensor(curve_scene[::max(1, q // 64)][:64], dtype=torch.float32)
+    if centers.shape[0] != 64:                          # pad by repeating the tail
+        centers = torch.cat([centers, centers[-1:].repeat(64 - centers.shape[0], 1)])
+    shape4 = torch.tensor([[math.log(0.03), math.log(0.01), 1.0, 0.0]]).repeat(64, 1)
+    table, tinfo = build_region_table(
+        torch.as_tensor(occ)[None, None], centers, shape4,
+        torch.linspace(0.0, 1.0, 64, dtype=torch.float64),
+        curve_scene=torch.as_tensor(curve_scene, dtype=torch.float32)[None],
+        gamma_scene=torch.as_tensor(curve_scene, dtype=torch.float32),
+        config=cfg["corridor"], scope="local", scene_scale=transform.scale)
+    assert len(tinfo["spans"]) == 4
+    assert len(tinfo["corridor_valid"]) == 4, "each span must be attempted"
+    assert len(tinfo["corridor_failure"]) == 4
+    assert table["cell_A"].shape[0] > 0
+
+
 # --------------------------------------------------------------------------- #
 # P1-2
 # --------------------------------------------------------------------------- #

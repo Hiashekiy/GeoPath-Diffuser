@@ -28,12 +28,12 @@ xxxxxxxx                                                                 [100%]
 | P1-4 | **已修** | `sampler._generate_safety`：搜索失败 → `search_failed`，不再用引导轨迹冒充路径；该样本不生成安全条件、`valid=False` | `test_failed_search_is_not_a_path` |
 | P1-5 | **已修** | `sampler.accept_correction`：碰撞率或最大违反量变差即拒绝该步修正 | `test_accept_correction_rejects_worse` |
 | P1-6 | **已修** | `collision_query.collision_spans_on_path`：碰撞位置投影到搜索路径的弧长 → 查询索引 | `test_local_spans_follow_the_projected_position` |
-| P1-7 | **已修** | `local_regions` info 新增 `dropped_spans` / `dropped_length_m`（不再静默丢弃） | 同上（返回字段） |
+| P1-7 | **已修（按最小修复原则重做）** | 直接删除区间数量上限：`collision_spans_on_path` 不再接受 `max_spans`，`configs/default.yaml` 的 `corridor.local.max_spans` 已移除，`build_region_table` 对每个合并后的区间都构建局部凸区域 | `test_all_collision_intervals_are_used`（四道独立墙 → 4 区间 → 4 span → 4 次构建） |
 | P2-1 | **已修** | `sampler._heading_errors_deg`（用 `basis_derivative_at` 精确切向）→ 输出 `heading_error_deg`，并纳入 `valid`（`sampling.heading_tol_deg = 20°`） | `test_heading_errors_measured` + smoke 检查 |
 | P2-2 | **已修（CUDA 未实测）** | `factory` 把 codec `to(device)`；`sampler` 搬 heading；pack 显式给 device | `test_pipeline_shapes_and_devices_on_cuda`（本机 `torch 2.14.0+cpu` → skip） |
 | P2-3 | **已修** | `scripts/setup_references.py` + README §3.2；`safety_cache.fingerprint`（配置 + 数据形状 + checkpoint 大小/mtime 的 sha256），加载时校验 | `test_cache_fingerprint_rejects_stale` |
 
-测试现状（本机 CPU）：`80 passed, 1 skipped`（skip 为 CUDA 用例）。
+测试现状（本机 CPU）：`81 passed, 1 skipped`（skip 为 CUDA 用例）。
 
 **本轮没有跑训练。** 之前那次 `train_dual_branch.py` 是修复过程中的一次误操作（16 个合成样本、4 个 epoch、共 16 步、约 30 秒、CPU），产出已删除，也没有任何基于它的结论。正式训练仍按你的要求，等代码复审通过后再谈。
 
@@ -219,10 +219,21 @@ step 0..4: 起点误差 0.31662 scene = 10.13 m ; 终点误差 1.04625 scene = 3
 修复方向（采纳复审建议）：把碰撞点投影到**搜索路径的最近点**，用该点的弧长参数取查询索引，
 而不是用碰撞点在自身轨迹上的序号比例。
 
-### P1-7 `max_spans` 静默截断 —— **确认**
+### P1-7 `max_spans` 截断 —— **确认，已按最小修复原则改为"不设上限"**
 
-`spans = collision_intervals(...)[:max_spans]`（默认 3），超过 3 段的碰撞区间被直接丢弃且无计数。
-修复：记录 `dropped_spans`、`dropped_collision_length`；超限时可合并为覆盖区间或提高上限。
+`spans = collision_intervals(...)[:max_spans]`（默认 3），超过 3 段的碰撞区间被直接丢弃。
+
+本轮修复**删除上限本身**，不加计数、不加回退策略：`collision_spans_on_path` 去掉
+`max_spans` 参数，`configs/default.yaml` 去掉 `corridor.local.max_spans`，
+`build_region_table` 对 `Merge(S_collision)` 中的每个区间都构建局部凸区域。
+`pad_queries` / `min_queries` / 相邻区间合并等既有机制保持不变。
+
+```
+S_used = Merge(S_collision)          # 不再有任何数量限制
+```
+
+验收：`test_all_collision_intervals_are_used` —— 一条直线穿过四道独立墙，
+要求 4 个碰撞区间、4 个互不相交的查询 span、4 次凸区域构建尝试。
 
 ---
 
@@ -287,7 +298,7 @@ sampler moves heading?  False  cache fingerprint?    False
 **P1（安全语义）**
 
 5. 碰撞区间改用线段穿越检测 + 投影到搜索路径求查询索引。
-6. `max_spans` 截断计数。
+6. ~~`max_spans` 截断计数~~ → 直接删除上限（本轮已改）。
 7. 前向后立刻锁端点（P1-3）。
 8. `local_cells == 0` 时跳过 ALM（P1-2）；`L_corridor` 区分障碍约束与边界约束。
 9. ALM 保守回退 + `alm_accepted/rejected` 记录（P1-5）。

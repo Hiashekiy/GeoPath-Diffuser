@@ -109,7 +109,7 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 
 ```powershell
 & $py scripts\audit_references.py    # 分支 / commit / 工作区 / checkpoint 张量形状 / 特征形状
-& $py -m pytest tests -q              # 79 个用例
+& $py -m pytest tests -q              # 82 个用例（81 passed + 1 CUDA skip）
 ```
 
 ### 3.4 运行

@@ -168,13 +168,14 @@ def _point_on_curve(curve_scene: np.ndarray, cum: np.ndarray, u: float) -> np.nd
 
 
 def collision_spans_on_path(occupancy, curve_scene, path_scene, n_query: int,
-                            pad: int = 4, min_q: int = 8, max_spans: int = 3,
+                            pad: int = 4, min_q: int = 8,
                             scene_scale: float = 32.0,
                             min_penetration_m: float = 0.0) -> Dict:
     """Collision intervals of ``curve_scene`` mapped onto query spans of ``path_scene``.
 
-    Returns ``spans`` (query index ranges), the raw intervals, and the number /
-    length of spans dropped by ``max_spans`` (never silently ignored).
+    Returns ``spans`` (query index ranges) for EVERY merged collision interval:
+    there is no cap on the number of intervals, so every independent collision
+    region of the trajectory gets its local convex regions built.
     """
     occ_np = (occupancy.detach().cpu().numpy() if hasattr(occupancy, "detach")
               else np.asarray(occupancy))
@@ -204,22 +205,11 @@ def collision_spans_on_path(occupancy, curve_scene, path_scene, n_query: int,
             qa = max(0, qb - int(min_q) + 1)
         spans.append((qa, qb))
 
+    # every merged interval is kept: no count limit, no truncation
     spans = _merge_spans(spans)
-    dropped = spans[max(0, int(max_spans)):]
-    kept = spans[:max(0, int(max_spans))]
-    # collision length that falls outside the kept spans (metres, for the report)
     total_len = float(info["path_length"])
-    dropped_length_scene = 0.0
-    if dropped:
-        for a, b in dropped:
-            lo, hi = a / max(q - 1, 1), b / max(q - 1, 1)
-            for iv in info["intervals"]:
-                overlap = max(0.0, min(iv["u_out"], hi) - max(iv["u_in"], lo))
-                dropped_length_scene += overlap * total_len
     return {
-        "spans": kept,
-        "dropped_spans": len(dropped),
-        "dropped_length_m": dropped_length_scene * float(scene_scale),
+        "spans": spans,
         "intervals": info["intervals"],
         "collision_fraction": info["collision_fraction"],
         "collision_length_m": info["collision_length"] * float(scene_scale),

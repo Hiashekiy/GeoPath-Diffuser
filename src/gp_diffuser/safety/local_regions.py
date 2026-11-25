@@ -16,7 +16,8 @@ Fixes applied after the code review (see ``docs/code_review_verification.md``):
   point samples (``safety/collision_query.py``);
 * **P1-6** the intervals are projected onto the searched path, so the query index
   follows the real geometry instead of a curve-index ratio;
-* **P1-7** spans dropped by ``max_spans`` are counted and reported;
+* **P1-7** there is no cap on the number of collision intervals: every merged
+  interval gets its local convex regions built;
 * box cells are flagged, so the training corridor loss can ignore them.
 """
 from __future__ import annotations
@@ -154,7 +155,6 @@ def build_region_table(occupancy_scene: torch.Tensor,
     local_cfg = dict(cfg.get("local") or {})
     pad = int(local_cfg.get("pad_queries", 4))
     min_q = int(local_cfg.get("min_queries", 8))
-    max_spans = int(local_cfg.get("max_spans", 3))
 
     centers_scene = torch.as_tensor(centers_scene, dtype=torch.float32)
     shape4_scene = torch.as_tensor(shape4_scene, dtype=torch.float32)
@@ -164,8 +164,7 @@ def build_region_table(occupancy_scene: torch.Tensor,
     info: Dict = {"scope": scope, "spans": [], "local_cells": 0, "box_cells": 0,
                   "corridor_valid": [], "corridor_failure": [], "bridges": 0,
                   "collision_fraction": 0.0, "collision_intervals": 0,
-                  "collision_length_m": 0.0, "dropped_spans": 0,
-                  "dropped_length_m": 0.0, "num_rows": 0}
+                  "collision_length_m": 0.0, "num_rows": 0}
 
     if spans is not None:
         span_list = [tuple(int(v) for v in s) for s in spans]
@@ -177,15 +176,13 @@ def build_region_table(occupancy_scene: torch.Tensor,
             query = collision_spans_on_path(
                 occupancy_scene, torch.as_tensor(curve_scene).detach().cpu().numpy(),
                 torch.as_tensor(gamma_scene).detach().cpu().numpy(), Q,
-                pad=pad, min_q=min_q, max_spans=max_spans,
+                pad=pad, min_q=min_q,
                 scene_scale=float(scene_scale), min_penetration_m=0.0)
             span_list = list(query["spans"])
             info.update({
                 "collision_fraction": float(query["collision_fraction"]),
                 "collision_intervals": int(query["n_intervals"]),
                 "collision_length_m": float(query["collision_length_m"]),
-                "dropped_spans": int(query["dropped_spans"]),
-                "dropped_length_m": float(query["dropped_length_m"]),
             })
         elif curve_scene is not None:
             # no path to project onto: fall back to the exact segment sweep and
