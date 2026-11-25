@@ -1,19 +1,25 @@
 """Condition encoders for the Conditional DiT.
 
-Implements exactly the conditioning of the design document (section 4.3/4.4):
+Three independent encoders (spec: 网络结构修改实施方案 §2 / §3):
 
-* ``MapFeatureProjection``: 1x1 convolution over the concatenated obstacle /
-  SDF bottleneck features, plus a 2-D sinusoidal positional encoding, flattened
-  to ``1024`` tokens of dimension ``D``.  This is a channel projection, NOT a
-  second map encoder: the spatial resolution (32x32) is preserved.
-* ``StartGoalEncoder``: start / goal / heading tokens with a validity mask (a
-  missing heading contributes a learned "absent" vector, never a fake angle).
-* ``SafetyConditionEncoder``: 128 path points (linear projection + 1-D
-  positional encoding) and 64 ellipse geometries (MLP), each with its own
-  modality embedding.
+``MapConditionEncoder``
+    Two frozen bottleneck features (occupancy, SDF) each go through their OWN
+    trainable adapter (1x1 conv -> GroupNorm(16) -> SiLU), are concatenated, and
+    are fused by a residual spatial block (depthwise 3x3 -> GroupNorm -> SiLU ->
+    pointwise 1x1 -> GroupNorm, added back to the concatenation).  The fused
+    ``[B,384,32,32]`` map is flattened and gets a 2-D sinusoidal positional
+    encoding, giving ``[B,1024,384]`` map memory.  The spatial resolution never
+    changes and no second encoder is introduced.
 
-All three produce the Cross-Attention key/value memory; the trajectory tokens
-are the queries.
+``StartGoalEncoder``
+    Start / goal / heading tokens with a validity mask (a missing heading
+    contributes a learned "absent" vector, never a fake angle).
+
+``SafetyConditionEncoder``
+    ONLY the 64 ellipse geometries: ``Linear(6->384) -> SiLU -> Linear(384->384)``,
+    plus a 1-D sinusoidal position encoding and the ellipse type embedding, giving
+    ``[B,64,384]``.  The search path is *not* a diffusion token any more; it stays
+    in the safety-geometry pipeline only.
 """
 from __future__ import annotations
 
@@ -24,6 +30,9 @@ import torch
 import torch.nn as nn
 
 
+# --------------------------------------------------------------------------- #
+# positional / timestep encodings
+# --------------------------------------------------------------------------- #
 def sincos_1d(length: int, dim: int, device=None, dtype=torch.float32) -> torch.Tensor:
     """Standard 1-D sinusoidal encoding ``[length, dim]`` (index based)."""
     position = torch.arange(length, device=device, dtype=torch.float32)[:, None]
@@ -73,31 +82,105 @@ class TimestepEmbedder(nn.Module):
         return self.mlp(timestep_embedding(t, self.mlp[0].in_features))
 
 
-class MapFeatureProjection(nn.Module):
-    """``[occ_bottleneck ; sdf_bottleneck]`` -> ``[B, H*W, D]`` map memory."""
+# --------------------------------------------------------------------------- #
+# map condition: dual adapter + residual spatial fusion
+# --------------------------------------------------------------------------- #
+class MapAdapter(nn.Module):
+    """One feature adapter: ``Conv2d(C, C, 1, bias=False) -> GroupNorm -> SiLU``."""
 
-    def __init__(self, hidden_dim: int = 384, occ_channels: int = 192,
-                 sdf_channels: int = 192, grid: int = 32):
+    def __init__(self, channels: int, groups: int = 16):
         super().__init__()
+        if channels % groups:
+            raise ValueError("channels %d must be divisible by groups %d"
+                             % (channels, groups))
+        self.conv = nn.Conv2d(int(channels), int(channels), kernel_size=1, bias=False)
+        self.norm = nn.GroupNorm(int(groups), int(channels))
+        self.act = nn.SiLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.act(self.norm(self.conv(x)))
+
+
+class ResidualSpatialFusion(nn.Module):
+    """``x + GN(PW(SiLU(GN(DW3x3(x)))))`` at unchanged spatial resolution."""
+
+    def __init__(self, channels: int, groups: int = 16, kernel_size: int = 3):
+        super().__init__()
+        if channels % groups:
+            raise ValueError("channels %d must be divisible by groups %d"
+                             % (channels, groups))
+        kernel = int(kernel_size)
+        padding = kernel // 2
+        self.depthwise = nn.Conv2d(int(channels), int(channels), kernel_size=kernel,
+                                  padding=padding, groups=int(channels), bias=False)
+        self.norm1 = nn.GroupNorm(int(groups), int(channels))
+        self.act = nn.SiLU()
+        self.pointwise = nn.Conv2d(int(channels), int(channels), kernel_size=1, bias=False)
+        self.norm2 = nn.GroupNorm(int(groups), int(channels))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.act(self.norm1(self.depthwise(x)))
+        h = self.norm2(self.pointwise(h))
+        return x + h
+
+
+class MapConditionEncoder(nn.Module):
+    """Two frozen bottleneck features -> ``[B,1024,D]`` map memory (trainable).
+
+    Replaces the previous single 1x1 ``MapFeatureProjection``: each modality gets
+    its own adapter (they must not share parameters), the adapters' outputs are
+    concatenated and then fused spatially before the flatten + 2-D position
+    encoding.  The frozen ResUNets are NOT part of this module.
+    """
+
+    def __init__(self, hidden_dim: int = 384, bottleneck_channels: int = 192,
+                 adapter_channels: Optional[int] = None, grid: int = 32,
+                 groups: int = 16, kernel_size: int = 3):
+        super().__init__()
+        adapter_channels = int(adapter_channels or bottleneck_channels)
+        if adapter_channels != int(bottleneck_channels):
+            raise ValueError("adapter_channels must equal bottleneck_channels "
+                             "(the adapters keep the bottleneck width)")
+        if 2 * adapter_channels != int(hidden_dim):
+            raise ValueError("2 x adapter_channels (%d) must equal hidden_dim (%d)"
+                             % (2 * adapter_channels, int(hidden_dim)))
         self.hidden_dim = int(hidden_dim)
         self.grid = int(grid)
-        self.proj = nn.Conv2d(int(occ_channels) + int(sdf_channels),
-                              int(hidden_dim), kernel_size=1)
+        self.occ_adapter = MapAdapter(adapter_channels, groups)
+        self.sdf_adapter = MapAdapter(adapter_channels, groups)
+        self.fusion = ResidualSpatialFusion(2 * adapter_channels, groups, kernel_size)
         self.register_buffer("pos", sincos_2d(self.grid, self.grid, self.hidden_dim),
                              persistent=False)
 
-    def forward(self, occ_bottleneck: torch.Tensor, sdf_bottleneck: torch.Tensor) -> torch.Tensor:
-        if occ_bottleneck.dim() != 4:
+    def forward(self, occ_bottleneck: torch.Tensor,
+                sdf_bottleneck: torch.Tensor) -> torch.Tensor:
+        if occ_bottleneck.dim() != 4 or sdf_bottleneck.dim() != 4:
             raise ValueError("expected [B,C,H,W] bottleneck features")
         if occ_bottleneck.shape[-2:] != (self.grid, self.grid):
             raise ValueError("bottleneck is %s, expected %d x %d"
                              % (tuple(occ_bottleneck.shape[-2:]), self.grid, self.grid))
-        feat = torch.cat([occ_bottleneck, sdf_bottleneck], dim=1)
-        feat = self.proj(feat)                                   # [B,D,32,32]
-        tokens = feat.flatten(2).transpose(1, 2)                 # [B,1024,D]
+        # adapters are out-of-place: the frozen features are never modified
+        occ_feat = self.occ_adapter(occ_bottleneck)
+        sdf_feat = self.sdf_adapter(sdf_bottleneck)
+        fused = self.fusion(torch.cat([occ_feat, sdf_feat], dim=1))   # [B,384,32,32]
+        tokens = fused.flatten(2).transpose(1, 2)                    # [B,1024,384]
         return tokens + self.pos.to(dtype=tokens.dtype, device=tokens.device)[None]
 
+    # ------------------------------------------------------------------ report
+    def parameter_breakdown(self) -> dict:
+        def count(module):
+            return sum(p.numel() for p in module.parameters())
+        return {
+            "occ_adapter": count(self.occ_adapter),
+            "sdf_adapter": count(self.sdf_adapter),
+            "spatial_fusion": count(self.fusion),
+            "total": count(self),
+        }
 
+
+# --------------------------------------------------------------------------- #
+# start / goal
+# --------------------------------------------------------------------------- #
 class StartGoalEncoder(nn.Module):
     """Start / goal / heading -> two condition tokens (with a heading mask)."""
 
@@ -115,12 +198,7 @@ class StartGoalEncoder(nn.Module):
     def forward(self, start_goal: torch.Tensor,
                 heading: Optional[torch.Tensor] = None,
                 heading_valid: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """``start_goal [B,2,2]`` -> ``[B,2,D]``.
-
-        ``heading [B,2,2]`` holds ``(cos, sin)`` per endpoint; rows whose
-        ``heading_valid`` is False swap in a learned "absent" vector instead of
-        a fabricated direction.
-        """
+        """``start_goal [B,2,2]`` -> ``[B,2,D]``."""
         if start_goal.dim() != 3 or start_goal.shape[1] != 2:
             raise ValueError("start_goal must be [B,2,2]")
         tokens = self.pos_proj(start_goal)
@@ -135,44 +213,48 @@ class StartGoalEncoder(nn.Module):
         return tokens + self.type_embed.to(tokens.dtype)[None]
 
 
+# --------------------------------------------------------------------------- #
+# safety condition: ellipses only
+# --------------------------------------------------------------------------- #
 class SafetyConditionEncoder(nn.Module):
-    """128 path points + 64 ellipses -> ``[B,192,D]`` safety tokens."""
+    """64 ellipses ``[B,64,6]`` -> safety memory ``[B,64,D]``.
 
-    TYPE_PATH = 0
-    TYPE_ELLIPSE = 1
+    The search path is deliberately NOT encoded here (spec §3.1): it stays in the
+    safety-geometry pipeline (ellipse centres, collision projection, corridor
+    construction) but is no longer a diffusion condition token.
+    """
 
-    def __init__(self, hidden_dim: int = 384, path_points: int = 128,
-                 num_ellipses: int = 64, ellipse_feature_dim: int = 6):
+    TYPE_ELLIPSE = 0
+
+    def __init__(self, hidden_dim: int = 384, num_ellipses: int = 64,
+                 ellipse_feature_dim: int = 6, add_positional_encoding: bool = True,
+                 add_type_embedding: bool = True):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
-        self.path_points = int(path_points)
         self.num_ellipses = int(num_ellipses)
-        self.path_proj = nn.Linear(2, hidden_dim)
         self.ellipse_proj = nn.Sequential(
             nn.Linear(int(ellipse_feature_dim), hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim))
-        self.type_embed = nn.Parameter(torch.zeros(2, hidden_dim))
-        nn.init.normal_(self.type_embed, std=0.02)
-        self.register_buffer("path_pos", sincos_1d(self.path_points, hidden_dim),
-                             persistent=False)
-        self.register_buffer("ellipse_pos", sincos_1d(self.num_ellipses, hidden_dim),
-                             persistent=False)
+        self.add_positional_encoding = bool(add_positional_encoding)
+        self.add_type_embedding = bool(add_type_embedding)
+        if self.add_type_embedding:
+            self.type_embed = nn.Parameter(torch.zeros(1, hidden_dim))
+            nn.init.normal_(self.type_embed, std=0.02)
+        if self.add_positional_encoding:
+            self.register_buffer("ellipse_pos", sincos_1d(self.num_ellipses, hidden_dim),
+                                 persistent=False)
 
-    def forward(self, path: torch.Tensor, ellipse: torch.Tensor,
-                valid: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if path.shape[1] != self.path_points:
-            raise ValueError("expected %d path points, got %d"
-                             % (self.path_points, path.shape[1]))
+    def forward(self, ellipse: torch.Tensor) -> torch.Tensor:
+        if ellipse.dim() != 3:
+            raise ValueError("ellipse must be [B,64,6]")
         if ellipse.shape[1] != self.num_ellipses:
             raise ValueError("expected %d ellipses, got %d"
                              % (self.num_ellipses, ellipse.shape[1]))
-        p = self.path_proj(path) + self.path_pos.to(path.dtype) + self.type_embed[self.TYPE_PATH]
-        e = self.ellipse_proj(ellipse) + self.ellipse_pos.to(ellipse.dtype) \
-            + self.type_embed[self.TYPE_ELLIPSE]
-        tokens = torch.cat([p, e], dim=1)
-        # Invalid rows are excluded by the cross-attention key mask the backbone
-        # builds from ``valid``; they are not zeroed here so that a partially
-        # valid condition never silently loses its learned projection.
+        tokens = self.ellipse_proj(ellipse)
+        if self.add_positional_encoding:
+            tokens = tokens + self.ellipse_pos.to(dtype=tokens.dtype)
+        if self.add_type_embedding:
+            tokens = tokens + self.type_embed.to(dtype=tokens.dtype)
         return tokens
 
 

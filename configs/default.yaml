@@ -28,11 +28,17 @@ map_encoder:
 
 map_condition:
   enabled: true
-  projection_dim: 384                # == diffusion.hidden_dim
+  encoder_type: "dual_adapter_residual_fusion"   # occ/sdf adapter -> concat -> fusion
   bottleneck_channels: 192           # enc3 channels for base=24
+  adapter_channels: 192              # per-modality adapter width (independent params)
+  fusion_channels: 384               # == adapter_channels * 2
+  projection_dim: 384                # == diffusion.hidden_dim
   grid: 32                           # 256 / 8 -> 32x32 -> 1024 tokens
-  positional_encoding: "2d_sincos"
-  preserve_spatial_resolution: true  # 1x1 conv only, no down/up sampling
+  adapter_norm: "group_norm"
+  adapter_groups: 16
+  spatial_fusion:
+    type: "depthwise_pointwise_residual"
+    kernel_size: 3
 
 diffusion:
   backbone: "conditional_dit"        # NEW network, not TrajSafe V5
@@ -45,7 +51,8 @@ diffusion:
   dropout: 0.0
   timestep_embedding: "sinusoidal_mlp"
   timestep_modulation: "adaln_zero"
-  condition_fusion: "cross_attention"
+  condition_fusion: "separate_map_safety_cross_attention"
+  safety_residual_gate_init: 0.1     # per-block learnable alpha_l
   train_diffusion_steps: 1000
   beta_schedule: "squaredcos_cap_v2"
   sampler: "ddim"
@@ -69,14 +76,13 @@ guidance:
 
 safety_condition:
   enabled: true
-  path_points: 128
   num_ellipses: 64
   ellipse_feature_dim: 6
-  path_embedding: "linear"
   ellipse_embedding: "mlp"
+  add_positional_encoding: true
   add_modality_embedding: true
-  build_corridor_only_near_collision: true
-  geometry_fixed_after_generation: true
+  path_tokens: false                 # the search path is NOT a diffusion token
+  build_corridor_only_near_collision: true   # geometry-side flag (unchanged)
 
 corridor:
   min_overlap_ratio: 0.10            # corridor.min_overlap_ratio (upstream)

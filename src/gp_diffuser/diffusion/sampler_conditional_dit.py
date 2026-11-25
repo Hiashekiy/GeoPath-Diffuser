@@ -57,14 +57,14 @@ def pick_times(num_timesteps: int, steps: Optional[int]):
 class ConditionalDiTSampler:
     """DDIM sampler around the Conditional DiT with frozen safety geometry."""
 
-    def __init__(self, model, codec, schedule: NoiseSchedule, map_projection,
+    def __init__(self, model, codec, schedule: NoiseSchedule, map_condition_encoder,
                  map_encoder, safety_generator, guidance_search, cfg: dict,
                  device: str = "cpu", transform: Optional[SceneTransform] = None,
                  scene_scale: float = 32.0):
         self.model = model
         self.codec = codec
         self.schedule = schedule
-        self.map_projection = map_projection
+        self.map_condition_encoder = map_condition_encoder
         self.map_encoder = map_encoder
         self.safety_generator = safety_generator
         self.guidance = guidance_search
@@ -194,8 +194,12 @@ class ConditionalDiTSampler:
         # ---- Step 0: one map encoding for the whole run ---------------------
         t0 = time.perf_counter()
         features = self.map_encoder.encode(occupancy, sdf)
-        map_memory = self.map_projection(features["occ_bottleneck"],
-                                         features["sdf_bottleneck"])
+        map_memory = self.map_condition_encoder(features["occ_bottleneck"],
+                                                features["sdf_bottleneck"])
+        # Map Context = 1024 map tokens + 2 start/goal tokens, reused by every
+        # reverse step of both modes (spec §6.1)
+        map_context = self.model.build_map_context(map_memory, start_goal,
+                                                   heading, heading_valid)
         timing["map_encode_s"] = time.perf_counter() - t0
 
         # ---- Step 1 setup: noise + hard endpoints --------------------------
@@ -210,6 +214,8 @@ class ConditionalDiTSampler:
         sqrt_1ma = self.schedule.sqrt_one_minus_alphas_cumprod.to(device).float()
 
         safety_condition = None
+        safety_memory = None
+        safety_mask = None
         safety_raw = None
         guide_scene = None
         pack = None
@@ -229,10 +235,9 @@ class ConditionalDiTSampler:
             t_tensor = torch.full((B,), int(t_cur), device=device, dtype=torch.long)
 
             t_fwd = time.perf_counter()
-            pred = self.model(q_t=q, t=t_tensor, map_memory=map_memory,
-                              cond=start_goal, heading=heading,
-                              heading_valid=heading_valid,
-                              safety_condition=safety_condition if use_safety else None)
+            pred = self.model(q_t=q, t=t_tensor, map_context=map_context,
+                              safety_memory=safety_memory if use_safety else None,
+                              safety_mask=safety_mask if use_safety else None)
             # P1-3: the network has no hard endpoint conditioning, so lock the
             # predicted polygon BEFORE decoding, searching and projecting.
             pred = self.codec.hard_control_endpoints(pred, start_goal)
@@ -254,13 +259,18 @@ class ConditionalDiTSampler:
                     # every search failed: stay map-only and say so (P1-4)
                     search_failed[:] = True
                     safety_condition = None
+                    safety_memory = None
+                    safety_mask = None
                     pack = None
                     corridor_info = {"local_cells": 0, "spans": [],
                                      "reason": "search_failed_all"}
                 else:
-                    safety_condition = {"path": safety_raw["path_scene"],
-                                        "ellipse": safety_raw["ellipse"],
+                    # safety condition = ellipse tokens only (spec §3.1)
+                    safety_condition = {"ellipse": safety_raw["ellipse"],
                                         "valid": safety_raw["valid"]}
+                    # encoded ONCE here and reused by every guided reverse step
+                    safety_memory, safety_mask = self.model.build_safety_memory(
+                        safety_condition["ellipse"], safety_condition["valid"])
                     pack = safety_raw["pack"]
                     local_cells = safety_raw["local_cells"]
                     search_failed = safety_raw["search_failed"]
@@ -355,6 +365,9 @@ class ConditionalDiTSampler:
             "search_failed": search_failed.detach().cpu(),
             "local_cells_per_sample": local_cells.detach().cpu(),
             "safety_condition": safety_condition,
+            "safety_memory": safety_memory,
+            "safety_mask": safety_mask,
+            "map_context_tokens": int(map_context.shape[1]),
             "ellipses": (None if safety_raw is None else safety_raw["ellipse"]),
             "ellipse_centers_scene": (None if safety_raw is None
                                       else safety_raw["ellipse_centers_scene"]),
@@ -467,7 +480,9 @@ class ConditionalDiTSampler:
         centers_scene_full = torch.zeros(B, Q, 2, dtype=torch.float32, device=device)
         path_scene_full = torch.zeros(B, path_len, 2, dtype=torch.float32, device=device)
         path_m_full = torch.zeros(B, path_len, 2, dtype=torch.float32, device=device)
-        valid_rows = torch.zeros(B, path_len + Q, dtype=torch.bool, device=device)
+        # ellipse validity only: a failed-search sample keeps an all-False mask so
+        # its safety residual is exactly zero (no fabricated ellipses)
+        valid_rows = torch.zeros(B, Q, dtype=torch.bool, device=device)
         for local_i, b in enumerate(ok_idx):
             ellipse_scene_full[b] = ellipse_scene[local_i]
             centers_scene_full[b] = centers_scene[local_i]

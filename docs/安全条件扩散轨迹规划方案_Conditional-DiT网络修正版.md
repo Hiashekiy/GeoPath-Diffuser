@@ -19,7 +19,7 @@
 - **双路同步联合训练**：共享同一套 Diffusion 主干参数，分别执行有安全特征分支和无安全特征分支。两个分支使用相同训练样本、扩散时间步和噪声，并通过联合损失训练；无安全特征分支额外向有安全特征分支的预测结果靠近。
 - **训练时构造安全条件**：使用训练样本的 GT 路径标签作为引导源，经过 Astar-Diffusion 引导场搜索得到引导搜索路径，再由 PathSafe-EllipseNet 生成椭圆安全特征，并构建局部凸安全约束。
 - **推理时先无安全、后有安全**：初始去噪使用无安全特征分支生成全局引导轨迹；在预设的中间去噪时刻，基于当前预测轨迹执行一次搜索，生成安全特征和凸约束；后续去噪切换到有安全特征分支。
-- **安全信息注入与硬约束结合**：路径和椭圆特征通过安全条件分支注入网络；固定的局部凸约束通过 ALM 在推理阶段修正网络预测的干净控制点。
+- **安全信息注入与硬约束结合**：椭圆几何经独立 Safety Cross-Attention 注入网络（搜索路径只服务几何构建，不作为 Diffusion 条件）；固定的局部凸约束通过 ALM 在推理阶段修正网络预测的干净控制点。
 - **安全几何只生成一次**：搜索路径、椭圆特征和凸约束在中间去噪时刻生成一次，后续反向去噪步骤固定复用。
 - **不使用历史反馈机制**：ALM 只负责当前去噪步的硬约束修正，修正结果用于当前 DDIM 状态更新，不再作为额外条件输入网络。
 
@@ -49,7 +49,7 @@ flowchart TD
     E --> B2[SDF 瓶颈特征]
     E --> F1[Occupancy 全分辨率特征]
     E --> F2[SDF 全分辨率特征]
-    B1 --> MP[Map Projection]
+    B1 --> MP[Map Condition Encoder]
     B2 --> MP
     MP --> MM[Map Memory]
     F1 --> SAFE[PathSafe-EllipseNet]
@@ -86,7 +86,7 @@ flowchart TD
 
 ### 2.1 两种条件模式
 
-设地图瓶颈特征经过通道投影和位置编码后形成地图记忆 \(M_{\mathrm{map}}\)，安全特征编码为 \(H_{\mathrm{safe}}\)。
+设地图瓶颈特征经**双 Adapter + 残差空间融合**与二维位置编码后形成地图记忆 \(M_{\mathrm{map}}\)（见 §3.4），椭圆几何经独立编码器形成安全记忆 \(H_{\mathrm{safe}}\)（见 §4.4）。两者是两条**独立**的条件通路：Map Context 始终启用，安全记忆只在安全条件模式下经各 Block 的独立 Safety Cross-Attention 注入。
 
 **模式 A：无安全特征分支（Map-only Branch）**
 
@@ -105,11 +105,11 @@ flowchart TD
 地图条件保持不变，额外增加路径与椭圆安全条件。两个模式调用同一个网络 \(f_\theta\)，仅条件输入不同：
 
 \[
-\hat Q_0^u=f_\theta(Q_t,t,S,G,M_{\mathrm{map}})
+\hat Q_0^u=f_\theta(Q_t,t,C_{\mathrm{map}})
 \]
 
 \[
-\hat Q_0^c=f_\theta(Q_t,t,S,G,M_{\mathrm{map}},H_{\mathrm{safe}})
+\hat Q_0^c=f_\theta(Q_t,t,C_{\mathrm{map}},H_{\mathrm{safe}})
 \]
 
 其中 \(\theta\) 是两个分支共享的参数。训练时两个表达式在同一次迭代中同时计算；推理时则先调用 Map-only 模式，在安全条件生成后调用 Safety-conditioned 模式。
@@ -198,40 +198,38 @@ def forward_with_features(self, x):
 - 对 Occupancy 和 SDF
     分别调用一次，得到两组瓶颈特征和两组全分辨率特征。
 
-### 3.4 地图特征如何交给 Diffusion
+### 3.4 地图特征如何交给 Diffusion：双 Adapter + 残差空间融合
 
-两个瓶颈特征通道数均为 192。通过一个轻量的通道投影层，将其映射到
-Conditional DiT-S 的隐藏维度 $D=384$：
+（2026-xx 网络结构修订：本节替换原来的"拼接后单个 1×1 卷积"描述，实现见
+`models/condition_encoders.py::MapConditionEncoder`。）
 
-$$
-F_{\mathrm{map}} = \operatorname{Conv}_{1\times1}\left([B_{\mathrm{occ}}; B_{\mathrm{sdf}}]\right)
-$$
+两个瓶颈特征通道数均为 192，先各自经过**独立**的可训练 Adapter（参数不共享）：
 
-其中：
+```text
+F̃_occ = SiLU(GroupNorm_16(Conv1x1(F_occ)))        # [B,192,32,32]
+F̃_sdf = SiLU(GroupNorm_16(Conv1x1(F_sdf)))        # [B,192,32,32]
+F_cat = Concat(F̃_occ, F̃_sdf)                      # [B,384,32,32]
+```
 
-$$
-[B_{\mathrm{occ}}; B_{\mathrm{sdf}}] \in \mathbb{R}^{B\times384\times32\times32}
-$$
+再经一个轻量残差空间融合块（3×3 depthwise 负责局部空间交互，1×1 pointwise 负责跨通道融合）：
 
-投影后：
+```text
+F_fused = F_cat + GN(PW(SiLU(GN(DW3x3(F_cat)))))   # [B,384,32,32]
+```
 
-$$
-F_{\mathrm{map}} \in \mathbb{R}^{B\times384\times32\times32}
-$$
+最后展平并加入二维正弦位置编码（位置编码必须在空间融合**之后**加入）：
 
-再加入二维空间位置编码并展平：
+```text
+M_map = Flatten(F_fused) + PE_2D                   # [B,1024,384]
+```
 
-$$
-M_{\mathrm{map}} = \operatorname{Flatten}(F_{\mathrm{map}}) + PE_{2D}
-$$
+要求与边界：
 
-$$
-M_{\mathrm{map}} \in \mathbb{R}^{B\times1024\times384}
-$$
-
-这里的 $1\times1$
-卷积只是通道对齐与特征融合，不是第二套地图编码网络，也不改变瓶颈特征的
-$32\times32$ 空间分辨率。
+- 两个 Adapter 必须独立：不能先拼接再用一个共享 Adapter 代替。
+- 空间分辨率始终为 32×32；不增加第二套 Encoder/Decoder，也不做下采样或上采样。
+- 融合结果已是 384 通道，不再叠加重复的 1×1 投影。
+- 冻结的仍是两个 ResUNet 编码器；`MapConditionEncoder` 参与训练，且
+  `torch.no_grad()` 只包住冻结编码器。
 
 ### 3.5 冻结策略
 
@@ -251,7 +249,7 @@ with torch.no_grad():
 
 - Occupancy Encoder：冻结。
 - SDF Encoder：冻结。
-- Diffusion 内的 Map Projection：参与训练。
+- Diffusion 内的 MapConditionEncoder（双 Adapter + 空间融合）：参与训练。
 - 路径点与椭圆几何的条件 Token 投影层：参与训练。
 - Conditional DiT 主干及输出头：参与训练。
 - 已训练的 PathSafe
@@ -341,78 +339,70 @@ H_{SG}=\operatorname{MLP}
 
 可将起点、终点和朝向拆成独立 Token，并添加对应的类型 Embedding。缺失朝向通过有效性 Mask 处理，不伪造方向值。
 
-### 4.4 条件 Token 构建
+### 4.4 条件 Token 构建：Map Context 与 Safety Memory 分离
 
-所有条件统一组织为 Cross-Attention 的 Key/Value Token。不同条件使用各自的输入投影和类型 Embedding，但进入主干后统一为 \(D=384\) 维。
+（2026-xx 网络结构修订：安全条件只保留椭圆 Token，且不再与地图条件拼成一条
+统一条件序列。）
 
 **（1）地图条件 Token**
 
-冻结地图编码器输出：
+冻结地图编码器输出 \(B_{\mathrm{occ}},B_{\mathrm{sdf}}\in\mathbb R^{B\times192\times32\times32}\)，
+经 §3.4 的 `MapConditionEncoder`（双 Adapter + 残差空间融合）得到：
 
 \[
-B_{\mathrm{occ}},B_{\mathrm{sdf}}
-\in\mathbb R^{B\times192\times32\times32}
+M_{\mathrm{map}}\in\mathbb R^{B\times1024\times384}
 \]
 
-拼接后使用一个 \(1\times1\) 投影层对齐到 DiT 隐藏维度：
+**（2）安全条件 Token（仅椭圆）**
 
 \[
-F_{\mathrm{map}}=
-\operatorname{Conv}_{1\times1}
-([B_{\mathrm{occ}};B_{\mathrm{sdf}}])
+E_{\mathrm{raw}}\in\mathbb R^{B\times64\times6}
+\]
+
+编码：`Linear(6→384) → SiLU → Linear(384→384)`，再加一维正弦位置编码与椭圆类型
+Embedding：
+
+\[
+H_{\mathrm{safe}}\in\mathbb R^{B\times64\times384},\qquad
+V_{\mathrm{ellipse}}\in\{0,1\}^{B\times64}
+\]
+
+搜索路径**不再作为 Diffusion 的条件 Token**。它仍然必须保留在安全几何流程中，用于：
+椭圆中心线与查询位置、碰撞区间投影、局部凸安全区域构建，以及相邻安全区域之间的连接。
+某样本搜索失败时，其椭圆 Mask 全 False，不允许用零填充椭圆冒充有效安全条件。
+
+**（3）两条条件通路**
+
+\[
+C_{\mathrm{map}}=[M_{\mathrm{map}};H_{SG}]\in\mathbb R^{B\times1026\times384}
+\qquad\text{（两种模式都使用）}
 \]
 
 \[
-M_{\mathrm{map}}=
-\operatorname{Flatten}(F_{\mathrm{map}})+PE_{2D}
-\in\mathbb R^{B\times1024\times384}
+H_{\mathrm{safe}}\in\mathbb R^{B\times64\times384}
+\qquad\text{（仅安全条件模式使用，独立一路）}
 \]
 
-这里仅做通道投影，不再建立新的地图编码网络。
+即：地图 + 起终点构成始终启用的 Map Context；安全条件是**独立的第二路**记忆，
+不再追加进 Map Context 之后再交给同一个 Cross-Attention。
 
-**（2）安全条件 Token**
-
-安全条件只在有安全特征模式下提供：
-
-- 搜索路径点：通过共享的线性投影 `Linear(2, D)` 转换为路径 Token，并加入路径序号位置编码。
-- 椭圆几何：每个椭圆的 \([c_x,c_y,a,b,\cos(2\theta),\sin(2\theta)]\) 通过标准 MLP 投影为一个 Token。
-- 路径 Token 和椭圆 Token 分别加入 modality/type Embedding，以区分语义。
-
-若路径为 128 个点、椭圆为 64 个，则：
-
-\[
-H_{\mathrm{safe}}\in\mathbb R^{B\times192\times384}
-\]
-
-这里不再单独设计一个深层 Skeleton Encoder 或 Path Encoder Block。路径与椭圆只进行必要的坐标/几何投影，跨点关系交由统一的 DiT 自注意力和 Cross-Attention 建模。
-
-**（3）完整条件记忆**
-
-无安全特征模式：
-
-\[
-\mathcal C_u=[M_{\mathrm{map}};H_{SG}]
-\]
-
-有安全特征模式：
-
-\[
-\mathcal C_c=[M_{\mathrm{map}};H_{SG};H_{\mathrm{safe}}]
-\]
-
-因此地图和起终点条件始终存在；安全条件是额外追加的 Token，不替换地图 Token。
-
-### 4.5 标准 Conditional DiT Block
+### 4.5 标准 Conditional DiT Block（含独立 Safety Cross-Attention）
 
 主干由 12 个结构相同的 Conditional DiT Block 堆叠构成，不再拆分 Control Backbone 和 Final Denoiser。
+每个 Block 依次为 Self-Attention → Map Cross-Attention → 可选 Safety Cross-Attention → MLP：
 
-每个 Block 使用标准 Transformer 组件：
-
-1. **AdaLN-Zero 调制**：将扩散时间步 \(t\) 经正弦时间嵌入和 MLP 编码，产生自适应 LayerNorm 的缩放、偏移和残差门控参数。
-2. **Trajectory Self-Attention**：在控制点 Token 之间进行多头自注意力，建模整条轨迹的全局依赖。
-3. **Condition Cross-Attention**：以轨迹 Token 为 Query，以条件记忆 \(\mathcal C\) 为 Key/Value，读取地图、起终点以及可选安全条件。
-4. **Feed-Forward Network**：采用标准两层 MLP，隐藏维度为 \(4D=1536\)，使用 GELU 等标准激活函数。
-5. **残差连接**：遵循 DiT/AdaLN-Zero 的标准残差调制方式，残差门控采用零初始化。
+1. **AdaLN-Zero 调制**：时间步经正弦嵌入 + MLP 产生 shift/scale/gate。原有
+   Self-Attention、Map Cross-Attention、MLP 三路的 AdaLN-Zero 实现与零初始化保持不变；
+   Safety 分支另有一组独立的 shift/scale，不重复叠加零初始化残差门控。
+2. **Trajectory Self-Attention**：控制点 Token 之间的多头自注意力。
+3. **Map Cross-Attention**：独立的 Attention 模块与独立 LayerNorm，Key/Value 为
+   \(C_{\mathrm{map}}\)（1024 地图 Token + 2 起终点 Token），两种模式都启用。
+4. **Safety Cross-Attention**：独立的 Attention 模块与独立 LayerNorm，Key/Value **只**是
+   \(H_{\mathrm{safe}}\)（64 椭圆 Token），不接收地图或路径点；通过每层可学习的门控系数
+   \(\alpha_l\)（初始 0.1）以残差方式注入。掩码全 False 的样本不参与该通路，其安全残差严格为 0
+   （避免 Softmax 全 −∞ 产生 NaN）。
+5. **Feed-Forward Network**：两层 MLP，隐藏维度 \(4D=1536\)。
+6. **残差连接**：遵循 DiT/AdaLN-Zero 的标准调制方式。
 
 概念结构：
 
@@ -420,37 +410,23 @@ H_{\mathrm{safe}}\in\mathbb R^{B\times192\times384}
 Trajectory Tokens X
         │
         ▼
-   AdaLN-Zero
+Trajectory Self-Attention          （AdaLN-Zero）
         │
         ▼
- Multi-Head Self-Attention
+Map Cross-Attention ◄────── Map Context [B,1026,384]
+        │                   （地图 1024 + 起终点 2，始终存在）
+        ▼
+Safety Cross-Attention ◄─── Safety Memory [B,64,384]
+        │                   （仅安全条件模式执行，α_l 门控残差）
+        ▼
+       MLP                          （AdaLN-Zero）
         │
         ▼
-   Residual Add
-        │
-        ▼
-   AdaLN / Norm
-        │
-        ▼
- Condition Cross-Attention ◄── Condition Tokens
-        │                       ├── Map Tokens（始终存在）
-        ▼                       ├── Start / Goal Tokens
-   Residual Add                 └── Safety Tokens（可选）
-        │
-        ▼
-   AdaLN / Norm
-        │
-        ▼
-       MLP
-        │
-        ▼
-   Residual Add
-        │
-        ▼
-      Output
+Updated Trajectory Tokens
 ```
 
-其中 Self-Attention、Cross-Attention 和 MLP 均采用成熟 Transformer 组件；不增加自定义 TrajBlock，不另设一个 Final Denoiser。
+Map Cross-Attention 与 Safety Cross-Attention 是两个独立模块：独立参数、独立 LayerNorm，
+不能共用一个 Attention 后再把两类条件 Token 拼接。
 
 ### 4.6 双路条件模式
 
@@ -460,16 +436,17 @@ Trajectory Tokens X
 
 \[
 \hat Q_0^u=
-f_\theta(Q_t,t,\mathcal C_u)
+f_\theta(Q_t,t,C_{\mathrm{map}})
 \]
 
-只提供地图和起终点条件，不提供搜索路径与椭圆安全 Token。
+只使用 Map Context（地图 + 起终点），**不执行** Safety Cross-Attention；
+不能用全零椭圆 Token 伪装成有安全条件的模式。
 
 **有安全特征分支：**
 
 \[
 \hat Q_0^c=
-f_\theta(Q_t,t,\mathcal C_c)
+f_\theta(Q_t,t,C_{\mathrm{map}},H_{\mathrm{safe}})
 \]
 
 在相同地图和起终点条件上，额外追加路径与椭圆安全 Token。
@@ -527,7 +504,7 @@ GT 路径只用于构造安全条件，不直接拼接到 Diffusion 的轨迹输
 推理时没有 GT 路径，因此先调用无安全特征分支：
 
 \[
-\hat Q_0^u=f_\theta(Q_t,t,S,G,M_{\mathrm{map}})
+\hat Q_0^u=f_\theta(Q_t,t,C_{\mathrm{map}})
 \]
 
 通过 B-spline 解码：
@@ -778,7 +755,7 @@ ALM 完成后进行全局轨迹碰撞验证：
 调用共享网络的 Map-only 模式：
 
 \[
-\hat Q_0^u=f_\theta(Q_t,t,S,G,M_{\mathrm{map}})
+\hat Q_0^u=f_\theta(Q_t,t,C_{\mathrm{map}})
 \]
 
 将预测控制点解码为初始连续轨迹，并按当前 DDIM 调度执行前段去噪。
@@ -793,7 +770,7 @@ ALM 完成后进行全局轨迹碰撞验证：
 4. 对搜索路径弧长重采样为 128 个点。
 5. 复用已有地图编码特征，调用 PathSafe-EllipseNet。
 6. 生成 64 个椭圆。
-7. 将路径和椭圆编码为 \(H_{\mathrm{safe}}\)。
+7. 只将 64 个椭圆编码为 \(H_{\mathrm{safe}}\in\mathbb R^{B\times64\times384}\)（搜索路径不进入 Diffusion 条件）。
 8. 根据当前轨迹碰撞区间，仅在局部构建凸安全区域。
 
 **搜索路径、安全特征和凸约束只在此处生成一次，后续反向步骤固定复用。**
@@ -804,7 +781,7 @@ ALM 完成后进行全局轨迹碰撞验证：
 
 \[
 \hat Q_0^c=
-f_\theta(Q_t,t,S,G,M_{\mathrm{map}},H_{\mathrm{safe}})
+f_\theta(Q_t,t,C_{\mathrm{map}},H_{\mathrm{safe}})
 \]
 
 对于存在有效局部凸约束的样本：
@@ -869,7 +846,7 @@ Q_t=\sqrt{\bar\alpha_t}Q_0^{gt}
 
 \[
 \hat Q_0^u=
-f_\theta(Q_t,t,S,G,M_{\mathrm{map}})
+f_\theta(Q_t,t,C_{\mathrm{map}})
 \]
 
 输入地图瓶颈特征，不输入搜索路径、椭圆安全特征或凸走廊 Token。
@@ -878,7 +855,7 @@ f_\theta(Q_t,t,S,G,M_{\mathrm{map}})
 
 \[
 \hat Q_0^c=
-f_\theta(Q_t,t,S,G,M_{\mathrm{map}},H_{\mathrm{safe}})
+f_\theta(Q_t,t,C_{\mathrm{map}},H_{\mathrm{safe}})
 \]
 
 输入相同的地图瓶颈特征，并额外输入由 GT 引导搜索路径生成的安全特征。
@@ -1168,23 +1145,28 @@ map_features = frozen_map_encoder(
 ### 11.2 Diffusion 地图条件
 
 ```python
-map_memory = map_feature_projection(
-    map_features["occ_bottleneck"],
-    map_features["sdf_bottleneck"],
-)
+# 训练与推理都一样：冻结编码器只跑一次
+with torch.no_grad():
+    map_features = frozen_map_encoder(occupancy=occupancy, sdf=sdf)
+
+map_memory = map_condition_encoder(
+    map_features["occ_bottleneck"],   # [B,192,32,32]
+    map_features["sdf_bottleneck"],   # [B,192,32,32]
+)                                     # -> [B,1024,384]
+
+map_context = model.build_map_context(
+    map_memory, start_goal, heading, heading_valid,
+)                                     # -> [B,1026,384]
 ```
 
-输出：
-
-```text
-[B, 1024, 384]
-```
+`MapConditionEncoder` 内部：两路独立 Adapter（Conv1x1 + GroupNorm16 + SiLU）→ 拼接
+→ 残差空间融合（DW3x3 + GN + SiLU + PW1x1 + GN，加回拼接）→ Flatten + 2D 位置编码。
 
 ### 11.3 安全特征生成
 
 ```python
 safety = safety_generator(
-    path=active_path,
+    path=active_path,                 # 只用于几何：椭圆中心线 / 碰撞投影 / 凸区域
     occ_feature=map_features["occ_full"],
     sdf_feature=map_features["sdf_full"],
     sdf=sdf,
@@ -1195,52 +1177,54 @@ safety = safety_generator(
 
 ```python
 {
-    "ellipse": ellipse_features,  # [B, 64, 6]
-    "path": active_path,          # [B, 128, 2]
-    "valid": safety_valid,
+    "ellipse": ellipse_features,      # [B, 64, 6]
+    "path": active_path,              # [B, 128, 2]  几何用，不作为 Diffusion 条件
+    "valid": safety_valid,            # [B, 64]      椭圆有效性
 }
 ```
 
-凸区域另行返回：
+安全记忆由模型侧一次性编码，之后所有反向步复用：
 
 ```python
-corridor = {
-    "A": ...,
-    "b": ...,
-    "assignment": ...,
-    "valid_mask": ...,
-}
+safety_memory, safety_mask = model.build_safety_memory(
+    safety["ellipse"], safety["valid"],
+)                                     # -> [B,64,384], [B,64]
+```
+
+凸区域另行返回（不变）：
+
+```python
+corridor = {"A": ..., "b": ..., "assignment": ..., "valid_mask": ...}
 ```
 
 ### 11.4 Diffusion 前向
 
-建议统一为：
-
 ```python
-# 无安全特征分支
+# 无安全特征分支（Map-only）：不传 safety_memory，Safety Cross-Attention 不执行
 pred_u = model(
     q_t=q_t,
-    map_memory=map_memory,
-    cond=start_goal,
     t=t,
-    safety_condition=None,
-    heading=heading,
-    heading_valid=heading_valid,
+    map_context=map_context,
+    safety_memory=None,
+    safety_mask=None,
 )
 
-# 有安全特征分支
+# 有安全特征分支：只传入椭圆记忆
 pred_c = model(
     q_t=q_t,
-    map_memory=map_memory,
-    cond=start_goal,
     t=t,
-    safety_condition=safety_condition,
-    heading=heading,
-    heading_valid=heading_valid,
+    map_context=map_context,
+    safety_memory=safety_memory,
+    safety_mask=safety_mask,
 )
 ```
 
-模型内部始终使用 `map_memory`。`safety_condition=None` 表示无安全特征模式；传入安全条件时，将路径点与椭圆几何投影为安全 Token，并追加到 Cross-Attention 的条件记忆中。主干仍然是同一套 Conditional DiT Block，不额外启用独立的 Path Encoder 或 Safety Backbone。
+两种模式调用同一个模型实例、共享全部主干参数（Trajectory Embedder、Timestep
+Embedder、所有 Self-Attention / Map Cross-Attention / MLP、Final Norm 与输出头）。
+差异只有是否执行各 Block 内的 Safety Cross-Attention。
+
+注意：`map_context`（>`map_memory`）与 `safety_memory` 必须保持为两条独立通路，
+不能重新合并成一个统一条件序列。
 
 ## 12. 配置建议
 
@@ -1260,9 +1244,17 @@ map_encoder:
 
 map_condition:
   enabled: true
-  projection_dim: 384
-  preserve_spatial_resolution: true
-  positional_encoding: "2d_sincos"
+  encoder_type: "dual_adapter_residual_fusion"
+  bottleneck_channels: 192      # enc3 输出通道（base=24）
+  adapter_channels: 192         # 每个模态一个独立 Adapter
+  fusion_channels: 384          # = adapter_channels * 2
+  projection_dim: 384           # = diffusion.hidden_dim
+  grid: 32                      # 256/8 -> 32x32 -> 1024 tokens
+  adapter_norm: "group_norm"
+  adapter_groups: 16
+  spatial_fusion:
+    type: "depthwise_pointwise_residual"
+    kernel_size: 3
 
 diffusion:
   backbone: "conditional_dit"
@@ -1276,7 +1268,8 @@ diffusion:
   timestep_embedding: "sinusoidal_mlp"
   timestep_modulation: "adaln_zero"
   trajectory_position_embedding: "1d_sincos"
-  condition_fusion: "cross_attention"
+  condition_fusion: "separate_map_safety_cross_attention"
+  safety_residual_gate_init: 0.1   # 每层可学习门控 alpha_l
   train_diffusion_steps: 1000
   beta_schedule: "cosine"
   sampler: "ddim"
@@ -1284,12 +1277,12 @@ diffusion:
 
 safety_condition:
   enabled: true
-  path_points: 128
   num_ellipses: 64
   ellipse_feature_dim: 6
-  path_embedding: "linear"
   ellipse_embedding: "mlp"
+  add_positional_encoding: true
   add_modality_embedding: true
+  path_tokens: false            # 搜索路径只用于几何，不作为 Diffusion 条件
   build_corridor_only_near_collision: true
   geometry_fixed_after_generation: true
 
@@ -1419,7 +1412,7 @@ sampling:
 \[
 (O,SDF)\xrightarrow{\text{Frozen Map Encoder}}
 (B_{\mathrm{occ}},B_{\mathrm{sdf}})
-\xrightarrow{\text{Map Projection}}M_{\mathrm{map}}
+\xrightarrow{\text{MapConditionEncoder}}M_{\mathrm{map}}
 \]
 
 \[
@@ -1432,11 +1425,11 @@ P_{\mathrm{GT}}\xrightarrow{\text{Astar-Diffusion Guided Search}}
 同一噪声状态分别进入共享网络的两个条件模式：
 
 \[
-\hat Q_0^u=f_\theta(Q_t,t,S,G,M_{\mathrm{map}})
+\hat Q_0^u=f_\theta(Q_t,t,C_{\mathrm{map}})
 \]
 
 \[
-\hat Q_0^c=f_\theta(Q_t,t,S,G,M_{\mathrm{map}},H_{\mathrm{safe}})
+\hat Q_0^c=f_\theta(Q_t,t,C_{\mathrm{map}},H_{\mathrm{safe}})
 \]
 
 \[
@@ -1454,11 +1447,11 @@ L_{\mathrm{total}}=
 \[
 (O,SDF)\xrightarrow{\text{Frozen Map Encoder}}
 (B_{\mathrm{occ}},B_{\mathrm{sdf}})
-\xrightarrow{\text{Map Projection}}M_{\mathrm{map}}
+\xrightarrow{\text{MapConditionEncoder}}M_{\mathrm{map}}
 \]
 
 \[
-(Q_t,t,S,G,M_{\mathrm{map}})
+(Q_t,t,C_{\mathrm{map}})
 \xrightarrow{\text{Map-only Branch}}
 \hat Q_0^u
 \]

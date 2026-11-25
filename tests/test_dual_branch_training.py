@@ -12,7 +12,8 @@ CACHE_SPLIT = "train_pytest_dual"
 
 
 def _trainer(pipeline, cfg):
-    return DualBranchTrainer(cfg, pipeline["model"], pipeline["map_projection"],
+    return DualBranchTrainer(cfg, pipeline["model"],
+                             pipeline["map_condition_encoder"],
                              pipeline["map_encoder"], pipeline["codec"],
                              pipeline["schedule"], device="cpu",
                              scene_scale=pipeline["transform"].scale)

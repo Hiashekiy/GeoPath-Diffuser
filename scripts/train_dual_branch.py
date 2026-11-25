@@ -56,7 +56,8 @@ def main() -> int:
         return 2
     items = [dataset[i] for i in range(len(dataset))]
 
-    trainer = DualBranchTrainer(cfg, pipe["model"], pipe["map_projection"],
+    trainer = DualBranchTrainer(cfg, pipe["model"],
+                                pipe["map_condition_encoder"],
                                 pipe["map_encoder"], pipe["codec"], pipe["schedule"],
                                 device=opts.device, scene_scale=pipe["transform"].scale)
     print("trainable parameters: %d (frozen encoders: %d trainable)"
@@ -77,8 +78,9 @@ def main() -> int:
     if opts.save:
         os.makedirs(os.path.dirname(os.path.abspath(opts.save)), exist_ok=True)
         import torch
-        torch.save({"model": pipe["model"].state_dict(),
-                    "map_projection": pipe["map_projection"].state_dict(),
+        torch.save({"architecture_version": pipe["model"].architecture_version,
+                    "model": pipe["model"].state_dict(),
+                    "map_condition_encoder": pipe["map_condition_encoder"].state_dict(),
                     "config": pipe["model"].config_dict(),
                     "history": trainer.history}, opts.save)
         print("checkpoint:", opts.save)

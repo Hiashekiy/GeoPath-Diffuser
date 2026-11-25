@@ -22,7 +22,8 @@
 ```text
 occupancy + sdf  (metres)
       │  frozen PathSafe ResUNet ×2        ← 只执行一次
-      ├── enc3 bottleneck [B,192,32,32] ──→ MapProjection ──→ map memory [B,1024,384]
+      ├── enc3 bottleneck [B,192,32,32] ──→ MapConditionEncoder ──→ map memory [B,1024,384]
+      │                                    （双 Adapter + 残差空间融合，可训练）
       └── full feature    [B,128,256,256] ─→ PathSafe-EllipseNet 的局部查询
                                                   │
 Q_T ~ N(0,I) ──→ Map-only DDIM 前段 ──→ 初始全局引导轨迹
@@ -31,9 +32,12 @@ Q_T ~ N(0,I) ──→ Map-only DDIM 前段 ──→ 初始全局引导轨迹
                                                   │  单条可行路径 [128,2] m
                               PathSafe-EllipseNet（1 次）→ 64 椭圆
                                                   │
+                    SafetyConditionEncoder（1 次）→ safety memory [B,64,384]
                               局部凸区域 + 约束包（1 次，碰撞区间 ±4，≥8 查询）
                                                   │
         Safety-conditioned DDIM 后段（固定复用以上几何）
+        Map-only 分支：只用 Map Context；安全分支：每层额外一条
+        Safety Cross-Attention（独立参数 + 可学习门控 α_l，初始 0.1）
                                                   │
                           每步 ALM：min ‖Q−Q_raw‖² + λs·L_smooth   s.t. A_jE_{l,r}Q ≤ b_j
                                                   │
@@ -129,7 +133,8 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 & $py scripts\train_dual_branch.py --steps 60 --epochs 4 --size 16 --save outputs/checkpoints/toy.pt
 
 # 5) 推理 + 三配置对照 + 出图（碰撞率 / 朝向误差 / 走廊违反 / ALM 接受-拒绝）
-& $py scripts\run_inference.py --samples 3 --steps 10 --checkpoint outputs/checkpoints/toy.pt
+#    仓库不附带任何权重；--checkpoint 指向第 4 步自己产出的文件（可省略 = 随机初始化）
+& $py scripts\run_inference.py --samples 3 --steps 10 --checkpoint outputs/checkpoints/last.pt
 ```
 
 缓存文件（`outputs/cache/safety_*.npz`）带指纹（配置子集 + 数据集形状 + checkpoint
@@ -140,15 +145,34 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 | 段 | 关键值 | 说明 |
 |---|---|---|
 | `map_encoder` | `checkpoint: references/PathSafe-Ellipse/checkpoints/v3_best.pt`，`freeze: true` | 架构从 checkpoint 内嵌 `cfg` 重建，不猜 YAML |
-| `map_condition` | 384 维投影、32×32 → 1024 token | 只做 1×1 通道投影，不改空间分辨率 |
+| `map_condition` | `encoder_type: dual_adapter_residual_fusion`：occ/sdf 各一个 Adapter（Conv1x1+GN16+SiLU）→ concat 384 → 残差空间融合（DW3x3+PW1x1）→ 1024 token | 分辨率始终 32×32；不新增编码器 |
 | `diffusion` | DiT-S：`hidden_dim 384 / depth 12 / num_heads 6 / mlp_ratio 4`，`x0` 预测，`squaredcos_cap_v2`，T=1000 | 与 V5 无关 |
+| `diffusion.condition_fusion` | `separate_map_safety_cross_attention`：每层 SA → Map CA → Safety CA → MLP | Map CA 独立参数/LayerNorm，始终启用；Safety CA 只在安全模式执行 |
+| `diffusion.safety_residual_gate_init` | `0.1`（每层可学习 α_l） | 不额外叠加零初始化门控 |
 | `trajectory` | `degree 3 / num_controls 32 / curve_points 128` | 控制点数是轨迹表示，不是网络深度 |
 | `guidance` | `lam 0.01 / weight linear / policy B3_linear_fusion / alpha 0.25 / path_points 128` | 上游实测最优组合；λ 随地图尺度调整 |
-| `safety_condition` | 128 路径点 + 64 椭圆，`[cx,cy,a,b,cos2θ,sin2θ]` | |
+| `safety_condition` | **仅 64 椭圆** `[cx,cy,a,b,cos2θ,sin2θ]`；`path_tokens: false` | 搜索路径仍用于椭圆中心线/碰撞投影/凸区域，但不进入 Diffusion |
 | `corridor` | `min_overlap_ratio 0.10`、`bridge`、`region.*`、`local.pad_queries 4`、`local.min_queries 8`、`training_scope full` | 数值沿用上游 `config_v5_c32q64.yaml` |
 | `alm` | `rho 5.0 / step_size 0.05 / inner_steps 6 / tol 1e-3 / max_curve_step_scene 0.20 / inherit_dual true / dense_verify 512` | 完全沿用上游，不另设 |
 | `sampling` | `steps 50`、`mid_forward_fraction 0.5` | 安全条件在第 ⌊0.5·(N−1)⌉ 次前向之后生成一次 |
 | `loss_weights` | `λu 1.0 / λc 1.0 / λalign 0.5 / λcol 1.0 / λcorr 1.0` | 待验证集调 |
+
+### 4.1 网络规模（实测，CPU 构建）
+
+| 模块 | 参数量 | 是否训练 |
+|---|---|---|
+| FrozenMapEncoder（两个 ResUNet，enc3 前向） | 3,157,168 | 冻结 |
+| PathSafe-EllipseNet 全网络（含安全几何头） | 5,041,093 | 冻结 |
+| MapConditionEncoder（occ/sdf Adapter + 融合） | 226,944 | 训练 |
+| Conditional DiT（含 Safety Encoder 150,912 + Safety CA 7,096,320） | 55,435,406 | 训练 |
+| 其中每层 Safety Cross-Attention / Map Cross-Attention / Self-Attention / MLP | 各 7,096,320 / 7,096,320 / 7,096,320 / 14,178,816 | — |
+| 每层可学习安全门控 α_l | 12（12×1） | 训练 |
+| **可训练参数合计** | **55,662,350** | |
+
+张量接口：`map_memory [B,1024,384]` → `map_context [B,1026,384]`；
+`ellipse [B,64,6]` → `safety_memory [B,64,384]` + `safety_mask [B,64]`。
+checkpoint 带 `architecture_version`（`conditional_dit_dual_map_fusion_dual_cross_attention_v2`），
+旧结构权重加载会直接报错提示重新训练。
 
 ## 5. 数据说明（重要）
 
@@ -163,7 +187,9 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 
 ## 6. 已知限制
 
-1. 只有 16 步烟测训练，模型未收敛；`outputs/checkpoints/*.pt` 是玩具权重。
+1. **仓库内没有任何 Diffusion 权重**：条件网络结构已变更
+   （`conditional_dit_dual_map_fusion_dual_cross_attention_v2`），旧结构 checkpoint 全部作废并已删除；
+   正式实验必须从头训练。`scripts/train_dual_branch.py` 只是训练入口。
 2. 冻结 PathSafe 在合成地图上椭圆偏薄（`b` 中位数 0.13 m）→ 走廊闭环率 ≈50 %（上游自身 54 %）；未闭环样本自动退化为"仅地图边界约束"，ALM no-op。
 3. 长路径（>60 m）C=32 拟合误差 0.62 m，建议切 `configs/c64_longpath.yaml`（待确认）。
 4. 训练用走廊是全路径 scope，推理用碰撞区间局部 scope（理由见 `docs/design_review.md` §3.1）。

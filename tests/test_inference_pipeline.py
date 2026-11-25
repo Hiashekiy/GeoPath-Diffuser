@@ -117,7 +117,7 @@ def test_safety_condition_object_is_stable_across_steps(pipeline, sample, monkey
     original = type(model).forward
 
     def spy(self, *args, **kwargs):
-        safety = kwargs.get("safety_condition")
+        safety = kwargs.get("safety_memory")
         conds.append(None if safety is None else id(safety))
         return original(self, *args, **kwargs)
 

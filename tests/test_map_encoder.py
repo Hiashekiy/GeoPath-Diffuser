@@ -82,7 +82,8 @@ def test_encoder_weights_unchanged_by_a_training_step(pipeline, cfg, sample):
     cache = load_safety_cache(cfg_local, cache_name)
     assert cache is not None
 
-    trainer = DualBranchTrainer(cfg_local, pipeline["model"], pipeline["map_projection"],
+    trainer = DualBranchTrainer(cfg_local, pipeline["model"],
+                                pipeline["map_condition_encoder"],
                                 pipeline["map_encoder"], pipeline["codec"],
                                 pipeline["schedule"], device="cpu",
                                 scene_scale=pipeline["transform"].scale)
@@ -94,10 +95,12 @@ def test_encoder_weights_unchanged_by_a_training_step(pipeline, cfg, sample):
 
 
 def test_diffusion_only_sees_bottleneck_channels(pipeline):
-    proj = pipeline["map_projection"]
-    assert proj.proj.in_channels == 384      # 192 (occ) + 192 (sdf) bottleneck
-    assert proj.proj.kernel_size == (1, 1)    # channel projection only
-    mem = proj(torch.zeros(1, 192, 32, 32), torch.zeros(1, 192, 32, 32))
+    """The map encoder consumes the two 192-channel bottlenecks, nothing else."""
+    encoder = pipeline["map_condition_encoder"]
+    assert encoder.occ_adapter.conv.in_channels == 192
+    assert encoder.sdf_adapter.conv.in_channels == 192
+    assert encoder.fusion.depthwise.in_channels == 384      # 192 + 192 after concat
+    mem = encoder(torch.zeros(1, 192, 32, 32), torch.zeros(1, 192, 32, 32))
     assert tuple(mem.shape) == (1, 1024, 384)
 
 

@@ -64,8 +64,12 @@ def main() -> int:
     check("all PathSafe parameters frozen",
           all(not p.requires_grad for p in net.parameters()))
 
-    mem = pipe["map_projection"](feats["occ_bottleneck"], feats["sdf_bottleneck"])
+    mem = pipe["map_condition_encoder"](feats["occ_bottleneck"], feats["sdf_bottleneck"])
     check("map memory is 1024 x 384", tuple(mem.shape[1:]) == (1024, 384), tuple(mem.shape))
+    breakdown = pipe["map_condition_encoder"].parameter_breakdown()
+    check("map condition encoder = dual adapter + residual fusion",
+          breakdown["occ_adapter"] > 0 and breakdown["sdf_adapter"] > 0
+          and breakdown["spatial_fusion"] > 0, breakdown)
 
     print("== stage 1-4: full sampling run")
     out = pipe["sampler"].sample(occ, sdf, sg, heading=item["heading"][None],
@@ -81,10 +85,14 @@ def main() -> int:
           bool(out["search_stats"][0]["valid"]), out["search_stats"][0]["status"])
     check("64 ellipses generated", out["ellipses"] is not None and out["ellipses"].shape[1] == 64,
           None if out["ellipses"] is None else tuple(out["ellipses"].shape))
-    check("safety tokens are 128 path + 64 ellipse",
-          out["safety_condition"] is not None
-          and out["safety_condition"]["path"].shape[1] == 128
-          and out["safety_condition"]["ellipse"].shape[1] == 64)
+    check("safety memory is 64 ellipse tokens only",
+          out["safety_memory"] is not None and out["safety_memory"].shape[1] == 64,
+          None if out["safety_memory"] is None else tuple(out["safety_memory"].shape))
+    check("map context is 1024 map + 2 start/goal tokens",
+          out["map_context_tokens"] == 1026, out["map_context_tokens"])
+    check("path is not a diffusion condition",
+          out["safety_condition"] is None
+          or "path" not in out["safety_condition"])
     info = out["corridor_info"] or {}
     check("corridor pack built", out["pack"] is not None)
     check("corridor scope is local (collision intervals only)",
