@@ -449,9 +449,9 @@ f_\theta(Q_t,t,C_{\mathrm{map}})
 f_\theta(Q_t,t,C_{\mathrm{map}},H_{\mathrm{safe}})
 \]
 
-在相同地图和起终点条件上，额外追加路径与椭圆安全 Token。
+在相同 Map Context 之上，额外通过每层独立的 Safety Cross-Attention 读取 Safety Memory（**仅 64 个椭圆 Token**）；搜索路径不作为条件 Token 进入网络。
 
-两个模式使用相同的轨迹 Token 投影、12 层 DiT Block、时间步嵌入和输出头。差异仅在 Cross-Attention 可读取的条件 Token 集合，不存在两套独立主干，也不需要额外的 Safety Backbone。
+两个模式使用相同的轨迹 Token 投影、12 层 DiT Block、时间步嵌入、Map Cross-Attention 和输出头。唯一差异是是否执行各 Block 内的 Safety Cross-Attention（Map-only 直接跳过，而不是用零椭圆 Token 伪装）。不存在两套独立主干，也不需要额外的 Safety Backbone。
 
 ### 4.7 输出头
 

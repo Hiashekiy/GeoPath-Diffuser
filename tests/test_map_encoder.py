@@ -82,10 +82,13 @@ def test_encoder_weights_unchanged_by_a_training_step(pipeline, cfg, sample):
     cache = load_safety_cache(cfg_local, cache_name)
     assert cache is not None
 
-    trainer = DualBranchTrainer(cfg_local, pipeline["model"],
-                                pipeline["map_condition_encoder"],
-                                pipeline["map_encoder"], pipeline["codec"],
-                                pipeline["schedule"], device="cpu",
+    from gp_diffuser.factory import (build_codec, build_map_condition_encoder,
+                                     build_model, build_schedule)
+    torch.manual_seed(0)
+    trainer = DualBranchTrainer(cfg_local, build_model(cfg_local),
+                                build_map_condition_encoder(cfg_local),
+                                pipeline["map_encoder"], build_codec(cfg_local),
+                                build_schedule(cfg_local), device="cpu",
                                 scene_scale=pipeline["transform"].scale)
     items = [dataset[i] for i in range(len(dataset))]
     trainer.train_step(items, cache, np.arange(len(items)))

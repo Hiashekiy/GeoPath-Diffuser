@@ -12,10 +12,15 @@ CACHE_SPLIT = "train_pytest_dual"
 
 
 def _trainer(pipeline, cfg):
-    return DualBranchTrainer(cfg, pipeline["model"],
-                             pipeline["map_condition_encoder"],
-                             pipeline["map_encoder"], pipeline["codec"],
-                             pipeline["schedule"], device="cpu",
+    """Own DiT + MapConditionEncoder + optimizer (no shared-state pollution)."""
+    from gp_diffuser.factory import (build_codec, build_map_condition_encoder,
+                                     build_model, build_schedule)
+    import torch
+    torch.manual_seed(0)
+    model = build_model(cfg)
+    encoder = build_map_condition_encoder(cfg)
+    return DualBranchTrainer(cfg, model, encoder, pipeline["map_encoder"],
+                             build_codec(cfg), build_schedule(cfg), device="cpu",
                              scene_scale=pipeline["transform"].scale)
 
 

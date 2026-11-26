@@ -38,6 +38,26 @@ def _ellipse(batch: int = 1) -> torch.Tensor:
     return ell
 
 
+def _fresh_with_head(cfg, pipeline, item, seed: int = 0):
+    """Fresh DiT + fresh map encoder, non-zero head so the output is meaningful.
+
+    A zero-initialised head would make every prediction exactly 0 and turn any
+    "unchanged output" assertion into a tautology.
+    """
+    from gp_diffuser.factory import build_map_condition_encoder, build_model
+    torch.manual_seed(seed)
+    model = build_model(cfg)
+    encoder = build_map_condition_encoder(cfg)
+    with torch.no_grad():
+        torch.nn.init.normal_(model.head.weight, std=0.02)
+        torch.nn.init.normal_(model.head.bias, std=0.002)
+    feats = pipeline["map_encoder"].encode(item["occupancy"][None], item["sdf"][None])
+    memory_map = encoder(feats["occ_bottleneck"], feats["sdf_bottleneck"])
+    ctx = model.build_map_context(memory_map, item["start_goal"][None],
+                                  item["heading"][None], item["heading_valid"][None])
+    return model, ctx
+
+
 def test_dit_s_configuration(pipeline):
     model = pipeline["model"]
     assert isinstance(model, ConditionalDiT)
@@ -112,9 +132,10 @@ def test_map_only_skips_safety_cross_attention(pipeline, sample, monkeypatch):
         assert calls["n"] == 12, "the safety branch must run in every block"
 
 
-def test_safety_residual_is_zero_for_an_all_false_mask(pipeline, sample):
+def test_safety_residual_is_zero_for_an_all_false_mask(pipeline, sample, cfg):
+    """All-False mask -> exactly the Map-only prediction, with no NaN."""
     item, _ = sample
-    model, ctx = _conditions(pipeline, item)
+    model, ctx = _fresh_with_head(cfg, pipeline, item)
     q = torch.randn(1, 32, 2)
     t = torch.tensor([700])
     memory, _ = model.build_safety_memory(_ellipse(1))
@@ -122,27 +143,40 @@ def test_safety_residual_is_zero_for_an_all_false_mask(pipeline, sample):
     with torch.no_grad():
         out_u = model(q, t, map_context=ctx)
         out_e = model(q, t, map_context=ctx, safety_memory=memory, safety_mask=empty)
+        # a non-zero head is required, otherwise both predictions are 0 and the
+        # equality below would be vacuous
+        assert float(out_u.abs().max()) > 0.0
     assert torch.allclose(out_u, out_e, atol=1e-6)
     assert torch.isfinite(out_e).all()
 
 
-def test_partial_mask_excludes_invalid_ellipses(pipeline, sample):
-    """Changing an invalid ellipse must not change the prediction."""
+def test_partial_mask_excludes_invalid_ellipses(pipeline, sample, cfg):
+    """Perturbing masked-out ellipses must not change the prediction.
+
+    Runs with a non-zero output head, so a change WOULD show up in the output.
+    """
     item, _ = sample
-    model, ctx = _conditions(pipeline, item)
+    model, ctx = _fresh_with_head(cfg, pipeline, item)
     mask = torch.zeros(1, 64, dtype=torch.bool)
-    mask[0, :32] = True
+    mask[0, :32] = True                         # 32 valid / 32 invalid
     ellipse = _ellipse(1)
     perturbed = ellipse.clone()
     perturbed[0, 32:] = 5.0                     # only the masked-out rows change
+    # sanity: perturbing the VALID rows must change the output
+    valid_perturbed = ellipse.clone()
+    valid_perturbed[0, :32] += 0.5
+    q = torch.randn(1, 32, 2)
+    t = torch.tensor([700])
     with torch.no_grad():
         memory_a, mask_a = model.build_safety_memory(ellipse, mask)
         memory_b, _ = model.build_safety_memory(perturbed, mask)
-        q = torch.randn(1, 32, 2)
-        t = torch.tensor([700])
+        memory_v, _ = model.build_safety_memory(valid_perturbed, mask)
         out_a = model(q, t, map_context=ctx, safety_memory=memory_a, safety_mask=mask_a)
         out_b = model(q, t, map_context=ctx, safety_memory=memory_b, safety_mask=mask_a)
-    assert torch.allclose(out_a, out_b, atol=1e-6)
+        out_v = model(q, t, map_context=ctx, safety_memory=memory_v, safety_mask=mask_a)
+    assert float(out_a.abs().max()) > 0.0
+    assert torch.allclose(out_a, out_b, atol=1e-6), "invalid rows must not matter"
+    assert not torch.allclose(out_a, out_v, atol=1e-6), "valid rows must matter"
     assert torch.isfinite(out_a).all()
 
 
@@ -167,12 +201,11 @@ def test_modes_share_one_set_of_parameters(pipeline, sample):
     assert not torch.allclose(y_u, y_c)
 
 
-def test_safety_branch_receives_gradient(pipeline, sample):
+def test_safety_branch_receives_gradient(pipeline, sample, cfg):
+    """Uses its OWN model: the head edit must not leak into other tests."""
     item, _ = sample
-    model, ctx = _conditions(pipeline, item)
+    model, ctx = _fresh_with_head(cfg, pipeline, item)      # non-zero head
     memory, mask = model.build_safety_memory(_ellipse(1))
-    # a non-zero head so the safety path influences the loss
-    torch.nn.init.normal_(model.head.weight, std=0.02)
     pred = model(torch.randn(1, 32, 2), torch.tensor([500]), map_context=ctx,
                  safety_memory=memory, safety_mask=mask)
     pred.square().mean().backward()

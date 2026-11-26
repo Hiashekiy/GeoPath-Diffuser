@@ -181,9 +181,14 @@ def two_sample_cache(pipeline, cfg):
 
 
 def _trainer(pipeline, cfg):
-    return DualBranchTrainer(cfg, pipeline["model"], pipeline["map_condition_encoder"],
-                             pipeline["map_encoder"], pipeline["codec"],
-                             pipeline["schedule"], device="cpu",
+    """Own DiT + MapConditionEncoder + optimizer (no shared-state pollution)."""
+    from gp_diffuser.factory import (build_codec, build_map_condition_encoder,
+                                     build_model, build_schedule)
+    torch.manual_seed(0)
+    model = build_model(cfg)
+    encoder = build_map_condition_encoder(cfg)
+    return DualBranchTrainer(cfg, model, encoder, pipeline["map_encoder"],
+                             build_codec(cfg), build_schedule(cfg), device="cpu",
                              scene_scale=pipeline["transform"].scale)
 
 
@@ -193,7 +198,7 @@ def test_trainer_shares_map_context_and_ellipse_memory(pipeline, cfg, two_sample
     items = [dataset[i] for i in range(len(dataset))]
     index = np.arange(len(items))
     seen = {"q_t": [], "t": [], "ctx": [], "safety": []}
-    model = pipeline["model"]
+    model = trainer.model
     original = type(model).forward
 
     def spy(self, q_t=None, t=None, map_context=None, safety_memory=None,
@@ -224,7 +229,7 @@ def test_trainer_optimizer_and_gradient_coverage(pipeline, cfg, two_sample_cache
     items = [dataset[i] for i in range(len(dataset))]
     index = np.arange(len(items))
     optimizer_ids = {id(p) for group in trainer.optimizer.param_groups for p in group["params"]}
-    for param in pipeline["map_condition_encoder"].parameters():
+    for param in trainer.map_condition_encoder.parameters():
         assert id(param) in optimizer_ids, "MapConditionEncoder must be optimised"
     for param in pipeline["map_encoder"].encoder_parameters():
         assert id(param) not in optimizer_ids, "frozen encoder must not be optimised"
@@ -238,17 +243,19 @@ def test_trainer_optimizer_and_gradient_coverage(pipeline, cfg, two_sample_cache
     original_clip = torch.nn.utils.clip_grad_norm_
     torch.nn.utils.clip_grad_norm_ = spy_clip
     try:
-        # step 1 leaves the AdaLN-Zero gates at zero, so the residual branches (and
-        # therefore the map encoder) still see zero gradient; step 2 does not
-        trainer.train_step(items, cache, index)
-        trainer.train_step(items, cache, index)
+        # the AdaLN-Zero gates start at exactly 0: step 1 only trains the head,
+        # step 2 opens the gates (and trains the safety branch), and only step 3
+        # gives the Map Cross-Attention / MapConditionEncoder gradient.  See
+        # tests/test_gradient_onset.py for the measured onset.
+        for _ in range(3):
+            trainer.train_step(items, cache, index)
     finally:
         torch.nn.utils.clip_grad_norm_ = original_clip
-    encoder_ids = {id(p) for p in pipeline["map_condition_encoder"].parameters()}
-    model_ids = {id(p) for p in pipeline["model"].parameters() if p.requires_grad}
+    encoder_ids = {id(p) for p in trainer.map_condition_encoder.parameters()}
+    model_ids = {id(p) for p in trainer.model.parameters() if p.requires_grad}
     assert clipped["ids"] == encoder_ids | model_ids, "clip must cover DiT + map encoder"
     assert any(p.grad is not None and float(p.grad.abs().sum()) > 0
-               for p in pipeline["map_condition_encoder"].parameters()), (
+               for p in trainer.map_condition_encoder.parameters()), (
         "the map encoder must receive gradient once the AdaLN gates are non-zero")
     assert all(p.grad is None for p in pipeline["map_encoder"].encoder_parameters())
 
