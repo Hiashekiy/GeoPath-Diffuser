@@ -114,6 +114,9 @@ def build_pipeline(cfg: dict, device: str = "cpu", with_pretrained: bool = True,
     # P2-2: the basis / pinv buffers must live on the compute device
     codec.to(device)
     schedule = build_schedule(cfg)
+    # P2-2: q_sample indexes the schedule tables with the timestep tensor, so
+    # they must live on the same device as t
+    schedule.to(device)
     guidance = GuidanceFieldSearch(cfg.get("guidance") or {},
                                   res_m=float(cfg_get(cfg, "dataset.res_m", 0.25)))
 

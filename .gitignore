@@ -11,6 +11,12 @@
 # ===========================================================================
 references/
 
+# --- datasets -------------------------------------------------------------
+# the real PathSafe-Ellipse dataset (maps / distance_fields / trajectories) is
+# staged locally and is far too large for git; everything used by the code is
+# regenerable or re-creatable (see README §5)
+data/
+
 # --- run artifacts ---------------------------------------------------------
 # checkpoints are ~170 MB for the 44.9 M-parameter DiT; the safety-condition
 # cache is regenerable from scripts/build_safety_cache.py

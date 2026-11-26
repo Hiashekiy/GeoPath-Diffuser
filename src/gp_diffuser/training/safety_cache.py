@@ -41,11 +41,26 @@ def cache_path(cfg: dict, split: str) -> str:
     return project_path(directory, "safety_%s.npz" % split)
 
 
-def fingerprint(cfg: dict, split: str, size: int, checkpoint: Optional[str] = None) -> str:
+def dataset_descriptor(dataset) -> Optional[dict]:
+    """Identity of the sample set, if the dataset exposes one (real datasets do).
+
+    ``None`` for the synthetic dataset, so existing caches stay valid.
+    """
+    digest = getattr(dataset, "digest", None)
+    if digest is None:
+        return None
+    return {"kind": type(dataset).__name__, "digest": str(digest),
+            "samples": len(dataset), "root": getattr(dataset, "root", None),
+            "split": getattr(dataset, "split", None)}
+
+
+def fingerprint(cfg: dict, split: str, size: int, checkpoint: Optional[str] = None,
+                dataset=None) -> str:
     """Stable hash of everything that changes the cached geometry.
 
     ``checkpoint`` defaults to the resolved PathSafe checkpoint, so a builder and a
-    loader compute the same value without passing it around.
+    loader compute the same value without passing it around.  ``dataset`` adds the
+    sample-set identity (split digest) when the dataset exposes one.
     """
     if checkpoint is None:
         try:
@@ -64,6 +79,7 @@ def fingerprint(cfg: dict, split: str, size: int, checkpoint: Optional[str] = No
         "trajectory": cfg.get("trajectory"),
         "guidance": cfg.get("guidance"),
         "checkpoint": None,
+        "dataset": dataset_descriptor(dataset),
     }
     if checkpoint and os.path.exists(checkpoint):
         stat = os.stat(checkpoint)
@@ -171,7 +187,9 @@ def build_safety_cache(dataset, net, safety_generator, guidance, cfg: dict,
                         ellipse_scene=np.stack(ellipses_scene),
                         cell_A=cell_A, cell_b=cell_b, cell_mask=cell_mask,
                         cell_is_box=cell_is_box, anchors=anchors)
-    checkpoint = getattr(getattr(net, "checkpoint_meta", {}) or {}, "get", lambda *a: None)("path")
+    checkpoint = (getattr(net, "checkpoint_meta", None) or {}).get("path") \
+        if net is not None else None
+    descriptor = dataset_descriptor(dataset)
     meta = {
         "split": split,
         "size": int(n),
@@ -182,7 +200,8 @@ def build_safety_cache(dataset, net, safety_generator, guidance, cfg: dict,
         "max_faces": int(max_faces),
         "scene_grid": int(grid),
         "res_m": res_m,
-        "fingerprint": fingerprint(cfg, split, n, checkpoint),
+        "fingerprint": fingerprint(cfg, split, n, checkpoint, dataset=dataset),
+        "dataset": descriptor,
         "search": search_stats,
         "corridor": infos,
     }
@@ -194,7 +213,8 @@ def build_safety_cache(dataset, net, safety_generator, guidance, cfg: dict,
 
 
 def load_safety_cache(cfg: dict, split: str, verify: bool = True,
-                      verbose: bool = True) -> Optional[Dict[str, np.ndarray]]:
+                      verbose: bool = True, dataset=None
+                      ) -> Optional[Dict[str, np.ndarray]]:
     """Load a cache, refusing one whose fingerprint no longer matches the config."""
     path = cache_path(cfg, split)
     if not os.path.exists(path):
@@ -209,7 +229,7 @@ def load_safety_cache(cfg: dict, split: str, verify: bool = True,
             print("[cache] %s has no meta file - rebuilding" % path)
             return None
         size = int(recorded.get("size", -1))
-        current = fingerprint(cfg, split, size)
+        current = fingerprint(cfg, split, size, dataset=dataset)
         if recorded.get("fingerprint") != current:
             print("[cache] stale cache (%s): fingerprint %s != %s - rebuild with "
                   "scripts/build_safety_cache.py"

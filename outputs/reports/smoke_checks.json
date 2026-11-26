@@ -119,14 +119,14 @@
     "num_dense_samples": 898
   },
   "timing": {
-    "map_encode_s": 0.11726840000483207,
-    "initial_diffusion_s": 0.17537709999305662,
-    "search_s": 0.15361249999841675,
-    "ellipse_s": 0.026573800001642667,
-    "corridor_s": 0.00047820000327192247,
-    "safety_total_s": 0.18647540001256857,
-    "guided_diffusion_s": 0.1238774000084959,
-    "final_validation_s": 0.006123300001490861,
-    "total_s": 0.6101114000048256
+    "map_encode_s": 0.13373419998970348,
+    "initial_diffusion_s": 0.22460580000188202,
+    "search_s": 0.21855720000166912,
+    "ellipse_s": 0.03841350000584498,
+    "corridor_s": 0.0006213000015122816,
+    "safety_total_s": 0.26571349998994265,
+    "guided_diffusion_s": 0.15481340000405908,
+    "final_validation_s": 0.006135899995570071,
+    "total_s": 0.7862615999911213
   }
 }

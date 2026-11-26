@@ -16,6 +16,8 @@ reports as the best expansion ratio (0.204 x A*, paths 4.2 % longer).
 """
 from __future__ import annotations
 
+import hashlib
+from collections import OrderedDict
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -67,6 +69,11 @@ class GuidanceFieldSearch:
         self.source_method = str(cfg.get("source_method", "M0"))
         self.inflation_cells = int(cfg.get("inflation_cells", 0))
         self.projection_radius = int(cfg.get("projection_radius", 4))
+        # Grid construction (neighbour table over H*W cells) dominates repeated
+        # searches on the same map, so identical occupancy arrays reuse one Grid.
+        # Grid is immutable, so this changes speed only, never the result.
+        self._grid_cache: "OrderedDict[bytes, Grid]" = OrderedDict()
+        self._grid_cache_size = int(cfg.get("grid_cache_size", 64))
 
     # ------------------------------------------------------------------ helpers
     def world_to_cell(self, points_xy: np.ndarray) -> np.ndarray:
@@ -121,7 +128,7 @@ class GuidanceFieldSearch:
         """
         occ = inflate_occupancy(occupancy, self.inflation_cells)
         occ = np.where(occ > 0, OCCUPIED, FREE).astype(np.int8)
-        grid = Grid(occ)
+        grid = self._grid_for(occ)
 
         start_raw = tuple(np.rint(self.world_to_cell(np.asarray(start_xy))[0]).astype(int))
         goal_raw = tuple(np.rint(self.world_to_cell(np.asarray(goal_xy))[0]).astype(int))
@@ -203,6 +210,20 @@ class GuidanceFieldSearch:
             out["debug"] = debug
         return out
 
+
+    def _grid_for(self, occ: np.ndarray) -> Grid:
+        """Immutable Grid per occupancy array, LRU-cached by content hash."""
+        key = hashlib.blake2b(np.ascontiguousarray(occ).tobytes(),
+                              digest_size=8).digest()
+        cached = self._grid_cache.get(key)
+        if cached is not None:
+            self._grid_cache.move_to_end(key)
+            return cached
+        grid = Grid(occ)
+        self._grid_cache[key] = grid
+        if len(self._grid_cache) > self._grid_cache_size:
+            self._grid_cache.popitem(last=False)
+        return grid
 
     def _verify_path(self, occ: np.ndarray, path_xy: np.ndarray):
         """Every resampled path sample must lie on a free cell of the safe map.

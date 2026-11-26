@@ -42,7 +42,7 @@ class DualBranchTrainer:
         self.map_encoder = map_encoder.to(device)
         self.map_encoder.eval()
         self.codec = codec
-        self.schedule = schedule
+        self.schedule = schedule.to(device)   # q_sample indexes these tables with t on the device
         self.device = device
         self.scene_scale = float(scene_scale)
         train_cfg = dict(self.cfg.get("training") or {})
@@ -93,12 +93,10 @@ class DualBranchTrainer:
             tables.append(table)
         return {"ellipse": ellipse, "valid": valid}, tables
 
-    # -------------------------------------------------------------- train step
-    def train_step(self, batch: List[Dict], cache: Dict[str, np.ndarray],
-                   index: np.ndarray) -> Dict[str, float]:
-        self.model.train()
-        self.map_condition_encoder.train()
-        self.map_encoder.eval()
+    # ------------------------------------------------------------- computation
+    def _compute(self, batch: List[Dict], cache: Dict[str, np.ndarray],
+                 index: np.ndarray):
+        """Shared forward pass + joint loss (used by train and eval)."""
         occupancy = self._batch_tensor(batch, "occupancy")
         sdf = self._batch_tensor(batch, "sdf")
         cond = self._batch_tensor(batch, "start_goal")
@@ -146,14 +144,6 @@ class DualBranchTrainer:
         loss = total_loss(loss_u, loss_c, loss_align, loss_col, loss_corr,
                           self.weights).mean()
 
-        # ---- exactly ONE backward + ONE update ----------------------------
-        self.optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        if self.grad_clip > 0:
-            # the clip must cover the DiT AND the new map encoder (spec §5.4)
-            torch.nn.utils.clip_grad_norm_(self.trainable_parameters, self.grad_clip)
-        self.optimizer.step()
-
         stats = {
             "loss": float(loss.item()),
             "loss_u": float(loss_u.mean().item()),
@@ -169,7 +159,36 @@ class DualBranchTrainer:
             "timestep_mean": float(t.float().mean().item()),
             "batch": int(B),
         }
+        return loss, stats
+
+    # -------------------------------------------------------------- train step
+    def train_step(self, batch: List[Dict], cache: Dict[str, np.ndarray],
+                   index: np.ndarray) -> Dict[str, float]:
+        self.model.train()
+        self.map_condition_encoder.train()
+        self.map_encoder.eval()
+        loss, stats = self._compute(batch, cache, index)
+
+        # ---- exactly ONE backward + ONE update ----------------------------
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        if self.grad_clip > 0:
+            # the clip must cover the DiT AND the new map encoder (spec §5.4)
+            torch.nn.utils.clip_grad_norm_(self.trainable_parameters, self.grad_clip)
+        self.optimizer.step()
+
         self.history.append(stats)
+        return stats
+
+    # --------------------------------------------------------------- eval step
+    @torch.no_grad()
+    def eval_step(self, batch: List[Dict], cache: Dict[str, np.ndarray],
+                  index: np.ndarray) -> Dict[str, float]:
+        """Same objective without gradient (validation only, no state change)."""
+        self.model.eval()
+        self.map_condition_encoder.eval()
+        self.map_encoder.eval()
+        _loss, stats = self._compute(batch, cache, index)
         return stats
 
     # --------------------------------------------------------------------- fit

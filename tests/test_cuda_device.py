@@ -32,6 +32,12 @@ def test_pipeline_shapes_and_devices_on_cuda(cfg):
         steps=4, seed=0)
     assert torch.isfinite(out["controls"]).all()
     assert out["controls"].device.type == "cuda"
+    # the schedule tables must be on the device too (q_sample indexes them with t)
+    assert pipeline["schedule"].sqrt_alphas_cumprod.device.type == "cuda"
+    q0 = torch.zeros(2, 32, 2, device="cuda")
+    t = torch.tensor([10, 20], device="cuda")
+    x_t = pipeline["schedule"].q_sample(q0, t)
+    assert x_t.device.type == "cuda" and torch.isfinite(x_t).all()
     if out["pack"] is not None:
         assert out["pack"].extraction.device.type == "cuda"
     if out["heading_error_deg"] is not None:

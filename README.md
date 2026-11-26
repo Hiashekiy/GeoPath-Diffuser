@@ -88,16 +88,22 @@ outputs/                 figures/ reports/ cache/ checkpoints/（运行产物）
 
 ## 3. 安装与运行
 
-### 3.1 环境
+### 3.1 环境（训练用 GPU 环境）
 
 ```powershell
-# 解释器（本机默认 3.14 的 torch 是坏的，必须用 3.12）
-$py = "C:\Users\zz\AppData\Local\Programs\Python\Python312\python.exe"
+# 推荐：conda 环境 GGMPC（Python 3.10, torch 2.9.1+cu126, CUDA 12.6, RTX 4070）
+$py = "E:\CondaEnvData\envs\GGMPC\python.exe"
 cd D:\ProjectDirectory\GeoPath-Diffuser
 
-& $py -m pip install torch numpy pyyaml matplotlib pytest
-& $py -m pip install scipy        # 可选；装上后引导场走 compiled sparse Dijkstra
+# 备用：系统 Python 3.12 + torch 2.14.0+cpu（仅 CPU，速度约慢 10 倍）
+#   C:\Users\zz\AppData\Local\Programs\Python\Python312\python.exe
 ```
+
+* 依赖（GGMPC 已全部具备）：`torch` / `numpy` / `scipy` / `pyyaml` / `matplotlib` / `pytest`。
+* 训练/推理加 `--device cuda`；不带该参数默认 `cpu`。
+* 系统默认的 `C:\Python314` 里 torch 是坏的（`DLL load failed`），不要用。
+* 设备一致性已由测试覆盖：`tests/test_cuda_device.py` 校验 codec buffer、heading、约束包、
+  **噪声调度表**（`q_sample` 用时间步索引它）都在同一设备上。
 
 ### 3.2 拉取三个只读参考仓库（必需，`references/` 被 git 忽略）
 
@@ -165,8 +171,12 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 | PathSafe-EllipseNet 全网络（含安全几何头） | 5,041,093 | 冻结 |
 | MapConditionEncoder（occ/sdf Adapter + 融合） | 226,944 | 训练 |
 | Conditional DiT（含 Safety Encoder 150,912 + Safety CA 7,096,320） | 55,435,406 | 训练 |
-| 其中每层 Safety Cross-Attention / Map Cross-Attention / Self-Attention / MLP | 各 7,096,320 / 7,096,320 / 7,096,320 / 14,178,816 | — |
-| 每层可学习安全门控 α_l | 12（12×1） | 训练 |
+| 其中 Self-Attention（12 层合计） | 7,096,320 | 训练 |
+| 其中 Map Cross-Attention（12 层合计） | 7,096,320 | 训练 |
+| 其中 Safety Cross-Attention（12 层合计） | 7,096,320 | 训练 |
+| 其中 MLP（12 层合计） | 14,178,816 | 训练 |
+| 其中 AdaLN 调制（12 层合计，含 bias：12×11×(384×384+384)） | **19,514,880** | 训练 |
+| 其中每层可学习安全门控 α_l | 12（12×1） | 训练 |
 | **可训练参数合计** | **55,662,350** | |
 
 张量接口：`map_memory [B,1024,384]` → `map_context [B,1026,384]`；
@@ -174,7 +184,60 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 checkpoint 带 `architecture_version`（`conditional_dit_dual_map_fusion_dual_cross_attention_v2`），
 旧结构权重加载会直接报错提示重新训练。
 
+### 4.2 梯度启动过程（实测，3 次真实 optimizer.step）
+
+结构不变的前提下，零初始化策略决定了前几步哪些参数能拿到梯度
+（`tests/test_gradient_onset.py` 用**全新**模型和真实 `optimizer.step` 逐帧记录）：
+
+| 步骤 | 获得有效梯度的部分 | 仍为 0 的部分 |
+|---|---|---|
+| 第 1 步 | `final_norm` + 输出头 | 其余全部（`head.weight = 0` → `dL/dx_final = 0`，AdaLN 残差门控也因 `gate = 0` 不产生权重梯度） |
+| 第 2 步 | AdaLN 调制（shift/scale/gate 的参数）+ 安全分支（Safety Encoder / Safety CA / α_l）+ 轨迹嵌入 | Self-Attention / Map CA / MLP 的权重、MapConditionEncoder（仍被 `gate = 0` 挡住） |
+| 第 3 步 | Self-Attention、**Map Cross-Attention**、MLP、时间步嵌入、起终点编码、**MapConditionEncoder** | —— |
+
+原因：输出头零初始化让第 1 步只有头部有梯度；AdaLN-Zero 的 gate 在第 1 步拿到梯度后变成非零，
+第 3 步才让被门控的子层权重开始训练。安全分支由 α_l = 0.1 直接门控，因此第 2 步就有梯度。
+这是既有零初始化策略的必然结果，不是接线错误；冻结编码器在任何一步都没有梯度。
+
 ## 5. 数据说明（重要）
+
+### 5.1 真实数据集 geopath_v1（推荐路径）
+
+真实数据在 `data/{trajectories,distance_fields,maps}`（PathSafe-Ellipse V3，只读，已 gitignore）。
+按《数据集制作方案》制作：
+
+```powershell
+# 1) 盘点 + 固定规格筛选（0.25 m/cell、256x256、64 m；48 m/80 m 全部排除）
+& $py scripts\audit_real_dataset.py
+
+# 2) 划分(map_group 80/10/10, seed 0) + GT 转换 + B-spline/碰撞审计
+& $py scripts\prepare_real_dataset.py --config configs/c64_longpath.yaml --pilot \
+        --limit-train 1000 --limit-val 200
+#    全量：去掉 --pilot
+
+# 3) 安全条件缓存（冻结 PathSafe-EllipseNet，指纹含样本 ID 摘要）
+& $py scripts\build_real_safety_cache.py --split train --config configs/c64_longpath.yaml
+& $py scripts\build_real_safety_cache.py --split val   --config configs/c64_longpath.yaml
+
+# 4) Pilot 验收 A–D（16 项检查）
+& $py scripts\validate_real_dataset.py --config configs/c64_longpath.yaml
+
+# 5) 训练（真实数据，C=64）
+& $py scripts\train_dual_branch.py --config configs/c64_longpath.yaml --dataset real \
+        --real-split train --val-split val --steps 900 --epochs 4 --batch-size 4 \
+        --save outputs/checkpoints/pilot_c64.pt
+```
+
+实测（Pilot）：16,756 条合格轨迹 / 5,702 张 0.25 m 地图 / 30 组；C=64 保留率 91.3%（C=32 为 77.3%）；
+train 915 + val 181 的安全缓存搜索成功率 100%、走廊闭环 86–90%；验收 16/16 通过。
+
+**训练现状**：Pilot 900 步（4 epoch，CPU 34 min）损失明确下降（total −52%，安全分支 −19%，走廊 −27%），
+验证集安全分支 −23%；但模型**远未收敛**（推理碰撞率 9–38%，长度可达 GT 3 倍），
+不构成任何性能结论。全量数据制作与正式训练待确认。详见 `docs/dataset_v1_report.md` §7。
+
+### 5.2 合成数据集（无真实数据时的回退）
+
+
 
 原数据集**不在本工作区**（PathSafe 的 `data/` 被 git 忽略；TrajSafe 的 `processed_root` 指向外部目录）。本项目自带合成场景生成器（`training/dataset.py`），严格对齐 PathSafe 文档化的数据契约：
 
