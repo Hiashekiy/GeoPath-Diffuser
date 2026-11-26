@@ -1,17 +1,17 @@
 {
   "split": "val",
-  "batches": 32,
+  "batches": 8,
   "mean": {
-    "loss": 1.9054042361676693,
-    "loss_u": 0.1993139609694481,
-    "loss_c": 0.16949965863022953,
-    "loss_align": 0.11735473648877814,
-    "loss_collision": 1.4397452062354432,
-    "loss_corridor": 0.03816805314272642,
-    "corridor_pieces": 443.90625,
-    "corridor_samples": 3.4375,
-    "safety_gate_mean": 0.10916826874017715,
-    "timestep_mean": 479.375,
-    "batch": 4.0
+    "loss": 2.4964062720537186,
+    "loss_u": 0.17168180085718632,
+    "loss_c": 0.07683359598740935,
+    "loss_align": 0.13257223553955555,
+    "loss_collision": 2.1696165204048157,
+    "loss_corridor": 0.011988252867013216,
+    "corridor_pieces": 1364.0,
+    "corridor_samples": 11.0,
+    "safety_gate_mean": 0.13844994455575943,
+    "timestep_mean": 495.171875,
+    "batch": 16.0
   }
 }

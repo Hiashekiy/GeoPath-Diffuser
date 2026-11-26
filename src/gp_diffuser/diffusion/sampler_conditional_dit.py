@@ -155,7 +155,8 @@ class ConditionalDiTSampler:
                safety_mode: str = "full",
                alm: bool = True,
                seed: Optional[int] = None,
-               return_trace: bool = True) -> Dict:
+               return_trace: bool = True,
+               record_curves: bool = False) -> Dict:
         """Full inference pipeline for a batch of scenes.
 
         ``occupancy`` ``[B,1,H,W]`` (1 = blocked, metres grid), ``sdf``
@@ -328,9 +329,14 @@ class ConditionalDiTSampler:
                 q = sa_s * q0_used + s1_s * eps
             q = self.codec.hard_control_endpoints(q, start_goal)
             if return_trace:
-                per_step.append({"forward": i, "t": int(t_cur), "t_prev": int(t_prev),
-                                 "branch": "safety" if use_safety else "map_only",
-                                 "alm": step_alm})
+                entry = {"forward": i, "t": int(t_cur), "t_prev": int(t_prev),
+                         "branch": "safety" if use_safety else "map_only",
+                         "alm": step_alm}
+                if record_curves:
+                    # visualisation only: the x0 estimate before/after ALM at this step
+                    entry["x0_scene"] = self._decode(pred).detach().cpu().numpy()
+                    entry["x0_alm_scene"] = self._decode(q0_used).detach().cpu().numpy()
+                per_step.append(entry)
 
         # ---- Step 4: final trajectory + dense validation -------------------
         t0 = time.perf_counter()
