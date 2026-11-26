@@ -74,7 +74,7 @@ def main() -> int:
         return 2
     # keep the dataset lazy: a full real split is ~13k x (occupancy+sdf) and would
     # not fit in memory if materialised here
-    items = dataset if opts.dataset == real else [dataset[i] for i in range(len(dataset))]
+    items = dataset if opts.dataset == "real" else [dataset[i] for i in range(len(dataset))]
 
     trainer = DualBranchTrainer(cfg, pipe["model"],
                                 pipe["map_condition_encoder"],
