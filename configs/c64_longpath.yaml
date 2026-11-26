@@ -14,3 +14,18 @@ trajectory:
 
 diffusion:
   num_controls: 64        # 由 factory 从 trajectory 读取；显式写出便于检查
+
+# ---- losses (TrajSafe-aligned; see src/gp_diffuser/training/losses.py) ------
+loss_weights:
+  lambda_c: 1.0            # interior-control MSE, safety branch
+  lambda_u: 1.0            # interior-control MSE, Map-only branch
+  lambda_align: 0.5        # dual-branch: Map-only chases the safety branch
+  lambda_boundary: 0.2     # RAW control polygon near both endpoints (TrajSafe 0.2)
+  lambda_smooth: 0.15      # 2nd/3rd differences of the control polygon
+  lambda_curve: 0.15       # same on the decoded curve
+  lambda_safe: 0.15        # THE continuous corridor violation (TrajSafe 0.15)
+
+model:
+  boundary_decoder:
+    span: 4
+    profile: [1.0, 0.75, 0.5, 0.25]

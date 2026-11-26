@@ -151,11 +151,13 @@ dataset:
   cache_dir: "outputs/cache"
 
 loss_weights:
-  lambda_u: 1.0
-  lambda_c: 1.0
-  lambda_align: 0.5
-  lambda_collision: 1.0
-  lambda_corridor: 1.0
+  lambda_u: 1.0            # interior-control MSE, Map-only branch
+  lambda_c: 1.0            # interior-control MSE, safety branch
+  lambda_align: 0.5        # dual-branch: Map-only chases the safety branch
+  lambda_boundary: 0.2     # RAW control polygon near both endpoints (TrajSafe 0.2)
+  lambda_smooth: 0.15      # 2nd/3rd differences of the control polygon
+  lambda_curve: 0.15       # same on the decoded curve
+  lambda_safe: 0.15        # THE continuous corridor violation (TrajSafe 0.15)
 
 dual_branch_training:
   enabled: true

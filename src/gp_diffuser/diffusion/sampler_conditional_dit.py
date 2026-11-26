@@ -35,6 +35,7 @@ import numpy as np
 import torch
 
 from ..frames import SceneTransform
+from ..models.boundary import BoundaryDecoder
 from ..safety.collision_query import curve_collision_intervals
 from ..safety.local_regions import pack_from_tables
 from ..safety.safety_features import ellipse_shape4_to_scene
@@ -70,6 +71,10 @@ class ConditionalDiTSampler:
         self.guidance = guidance_search
         self.cfg = dict(cfg or {})
         self.device = device
+        boundary_cfg = dict(((self.cfg.get("model") or {}).get("boundary_decoder") or {}))
+        self.boundary = BoundaryDecoder(profile=boundary_cfg.get("profile"),
+                                        span=boundary_cfg.get("span"),
+                                        dtype=torch.float32).to(device)
         if transform is None:
             grid = int((self.cfg.get("dataset") or {}).get("grid", 256))
             transform = SceneTransform(2.0 * scene_scale, grid)
@@ -205,7 +210,7 @@ class ConditionalDiTSampler:
 
         # ---- Step 1 setup: noise + hard endpoints --------------------------
         q = torch.randn(B, C, 2, device=device, dtype=torch.float32)
-        q = self.codec.hard_control_endpoints(q, start_goal)
+        q = self.boundary(q, start_goal)
         T = int(self.schedule.num_timesteps)
         times = pick_times(T, steps) or list(range(T))
         reverse = list(reversed(times))
@@ -241,7 +246,7 @@ class ConditionalDiTSampler:
                               safety_mask=safety_mask if use_safety else None)
             # P1-3: the network has no hard endpoint conditioning, so lock the
             # predicted polygon BEFORE decoding, searching and projecting.
-            pred = self.codec.hard_control_endpoints(pred, start_goal)
+            pred = self.boundary(pred, start_goal)
             dt_fwd = time.perf_counter() - t_fwd
             key = "guided_diffusion_s" if use_safety else "initial_diffusion_s"
             timing[key] = timing.get(key, 0.0) + dt_fwd
@@ -327,7 +332,7 @@ class ConditionalDiTSampler:
                 sa_s, s1_s = sqrt_ab[int(t_prev)], sqrt_1ma[int(t_prev)]
                 eps = (q - sa_t * q0_used) / s1_t.clamp_min(1e-8)
                 q = sa_s * q0_used + s1_s * eps
-            q = self.codec.hard_control_endpoints(q, start_goal)
+            q = self.boundary(q, start_goal)
             if return_trace:
                 entry = {"forward": i, "t": int(t_cur), "t_prev": int(t_prev),
                          "branch": "safety" if use_safety else "map_only",

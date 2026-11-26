@@ -32,29 +32,55 @@ from gp_diffuser.safety.local_regions import (build_region_table, pack_from_tabl
 from gp_diffuser.safety.safety_corridor import build_safety_corridor
 from gp_diffuser.safety.safety_features import ellipse_shape4_to_scene
 from gp_diffuser.training.dataset import SyntheticTrajectoryDataset
-from gp_diffuser.training.losses import collision_loss, corridor_loss
+from gp_diffuser.training.losses import (continuous_safety_loss,
+                                          pack_violation)
 
 
 # --------------------------------------------------------------------------- #
-# P0-1
+# P0-1 — the SDF/margin collision term is gone; the single safety term is the
+# continuous convex-hull violation against the corridor pack (TrajSafe design).
 # --------------------------------------------------------------------------- #
-def test_collision_loss_uses_metre_margin():
-    """0.20 m clearance under a 0.30 m margin must be penalised (0.01)."""
-    sdf = torch.full((1, 1, 256, 256), 0.20)
-    pts = torch.zeros(1, 8, 2)
-    pts[0, :, 0] = torch.linspace(-0.5, 0.5, 8)
-    loss = collision_loss(pts, sdf, margin_m=0.30, scene_scale=32.0)
-    assert float(loss.mean()) == pytest.approx(0.01, rel=1e-5)
+def _unit_pack(controls_per_sample=8, offset=0.0):
+    """A single half-space ``x <= 0`` applied to every Bezier control."""
+    B, C = 1, controls_per_sample
+    piece = C - 3
+    A = torch.zeros(B, piece, 1, 2)
+    A[..., 0] = 1.0
+    b = torch.full((B, piece, 1), float(offset))
+    return pack_stub(A, b, B, piece, C)
 
 
-@pytest.mark.parametrize("clearance,expected", [(0.05, 0.0625), (0.10, 0.04),
-                                               (0.29, 0.0001), (0.35, 0.0)])
-def test_collision_loss_analytic(clearance, expected):
-    sdf = torch.full((1, 1, 256, 256), float(clearance))
-    pts = torch.zeros(1, 4, 2)
-    pts[0, :, 0] = torch.linspace(-0.5, 0.5, 4)
-    assert float(collision_loss(pts, sdf, margin_m=0.30).mean()) == \
-        pytest.approx(expected, abs=1e-6)
+def pack_stub(A, b, B, piece, C):
+    class _Pack:
+        pass
+
+    pack = _Pack()
+    pack.piece_A = A
+    pack.piece_b = b
+    pack.piece_mask = torch.ones(B, piece, dtype=torch.bool)
+    pack.face_mask = torch.ones(B, piece, A.shape[2], dtype=torch.bool)
+    extraction = torch.zeros(B, piece, 4, C)
+    for i in range(piece):
+        for j in range(4):
+            extraction[:, i, j, i + j] = 1.0
+    pack.extraction = extraction
+    return pack
+
+
+def test_continuous_safety_loss_zero_inside_and_positive_outside():
+    pack = _unit_pack(offset=0.0)
+    inside = torch.full((1, 8, 2), -0.5)
+    assert float(pack_violation(inside, pack).sum()) == 0.0
+    outside = torch.full((1, 8, 2), 0.25)
+    value = float(pack_violation(outside, pack)[0])
+    assert value == pytest.approx(0.25, rel=1e-5), "max violation in scene units"
+
+
+def test_continuous_safety_loss_ignores_box_cells():
+    pack = _unit_pack(offset=-1.0)          # trivially satisfied
+    pack.piece_mask[:] = False              # no local cell at all
+    controls = torch.rand(1, 8, 2)
+    assert float(continuous_safety_loss(controls, pack).sum()) == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -342,9 +368,11 @@ def test_corridor_loss_ignores_box_cells(pipeline, sample, cfg):
     pack_all = pack_from_tables(pipeline["codec"], [box_only], include_box=True)
     pack_local = pack_from_tables(pipeline["codec"], [box_only], include_box=False)
     assert pack_all is not None and int(pack_all.piece_mask.sum()) > 0
-    assert pack_local is None
+    assert pack_local is None, "box cells must not become corridor constraints"
     controls = torch.zeros(1, 32, 2)
-    assert float(corridor_loss(controls, pack_local).sum()) == 0.0
+    # no local pack at all -> the single safety term contributes exactly zero
+    loss = continuous_safety_loss(controls, pack_local)
+    assert float(loss.sum()) == 0.0 and loss.requires_grad
 
 
 # --------------------------------------------------------------------------- #

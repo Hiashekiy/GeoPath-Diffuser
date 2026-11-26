@@ -106,7 +106,8 @@ def main() -> int:
             "heading_error_deg_max": None if out["heading_error_deg"] is None
             else float(out["heading_error_deg"].max()),
             "alm_steps": len(out["alm_stats"]),
-            "alm_accepted": bool(out["accepted_mask"][0]) if out.get("accepted_mask") is not None else False,
+            "alm_accepted": int(out.get("alm_accepted_steps", 0)),
+            "alm_rejected": int(out.get("alm_rejected_steps", 0)),
             "dense_collision_fraction": float(out.get("dense_collision_fraction", 0.0)),
             "search_failed": bool(out.get("search_failed", False)),
             "local_cells": int(out["corridor_info"].get("local_cells", 0)),
@@ -117,8 +118,11 @@ def main() -> int:
         "valid_rate": float(np.mean([r["valid"] for r in records])) if records else 0.0,
         "collision_free_rate": float(np.mean([r["collision_rate"] == 0 for r in records]))
         if records else 0.0,
-        "alm_accept_rate": float(np.mean([r["alm_accepted"] for r in records]))
-        if records else 0.0,
+        "alm_accept_rate": (float(sum(r["alm_accepted"] for r in records))
+                            / max(sum(r["alm_accepted"] + r["alm_rejected"]
+                                      for r in records), 1)) if records else 0.0,
+        "alm_samples_with_steps": int(sum(1 for r in records
+                                          if r["alm_accepted"] + r["alm_rejected"] > 0)),
         "collision_rate": _stats([r["collision_rate"] for r in records]),
         "min_clearance_m": _stats([r["min_clearance_m"] for r in records]),
         "length_error_m": _stats([r["length_error_m"] for r in records]),

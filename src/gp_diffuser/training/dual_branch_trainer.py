@@ -24,10 +24,12 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
+from ..models.boundary import BoundaryDecoder
 from ..models.conditional_dit import ConditionalDiT
 from ..safety.local_regions import pack_from_tables
-from .losses import (alignment_loss, collision_loss, control_loss, corridor_loss,
-                     total_loss)
+from .losses import (DEFAULT_LOSS_WEIGHTS, alignment_loss, boundary_control_loss,
+                     continuous_safety_loss, control_smoothness_loss,
+                     control_x0_loss, curve_smoothness_loss, total_loss)
 
 
 class DualBranchTrainer:
@@ -46,15 +48,15 @@ class DualBranchTrainer:
         self.device = device
         self.scene_scale = float(scene_scale)
         train_cfg = dict(self.cfg.get("training") or {})
-        weights = dict(self.cfg.get("loss_weights") or {})
-        self.weights = {
-            "lambda_u": float(weights.get("lambda_u", 1.0)),
-            "lambda_c": float(weights.get("lambda_c", 1.0)),
-            "lambda_align": float(weights.get("lambda_align", 0.5)),
-            "lambda_collision": float(weights.get("lambda_collision", 1.0)),
-            "lambda_corridor": float(weights.get("lambda_corridor", 1.0)),
-        }
-        self.collision_margin_m = float(train_cfg.get("collision_margin_m", 0.3))
+        weights = dict(DEFAULT_LOSS_WEIGHTS)
+        weights.update({k: float(v) for k, v in (self.cfg.get("loss_weights") or {}).items()
+                        if k in weights})
+        self.weights = weights
+        # parameter-free endpoint modulation, shared with the sampler (TrajSafe)
+        boundary_cfg = dict(((self.cfg.get("model") or {}).get("boundary_decoder") or {}))
+        self.boundary = BoundaryDecoder(profile=boundary_cfg.get("profile"),
+                                        span=boundary_cfg.get("span"),
+                                        dtype=torch.float32).to(device)
         self.trainable_parameters = (
             [p for p in self.model.parameters() if p.requires_grad]
             + [p for p in self.map_condition_encoder.parameters() if p.requires_grad])
@@ -128,29 +130,42 @@ class DualBranchTrainer:
         q_t = self.schedule.q_sample(q0, t, eps).to(q0.dtype)
 
         # ---- two forward passes of the SAME model -------------------------
-        pred_u = self.model(q_t=q_t, t=t, map_context=map_context)
-        pred_c = self.model(q_t=q_t, t=t, map_context=map_context,
-                            safety_memory=safety_memory, safety_mask=safety_mask)
+        # the network emits a FREE control polygon; the fixed boundary decoder
+        # turns it into an exact-endpoint polygon (never a teleport of Q_0/Q_{C-1})
+        raw_u = self.model(q_t=q_t, t=t, map_context=map_context)
+        raw_c = self.model(q_t=q_t, t=t, map_context=map_context,
+                           safety_memory=safety_memory, safety_mask=safety_mask)
+        pred_u = self.boundary(raw_u, cond)
+        pred_c = self.boundary(raw_c, cond)
 
-        # ---- losses -------------------------------------------------------
-        loss_u = control_loss(pred_u, q0)
-        loss_c = control_loss(pred_c, q0)
+        # ---- losses (TrajSafe-aligned) ------------------------------------
+        loss_u = control_x0_loss(pred_u, q0)          # interior controls only
+        loss_c = control_x0_loss(pred_c, q0)
         loss_align = alignment_loss(pred_u, pred_c)
-        curve_c = self.codec.decode_controls(pred_c)
-        loss_col = collision_loss(curve_c, sdf, margin_m=self.collision_margin_m,
-                                  scene_scale=self.scene_scale)
-        loss_corr = corridor_loss(pred_c, pack)
+        ws, wg = self.boundary.weights(q0.shape[1], device=self.device, dtype=q0.dtype)
+        loss_bound = 0.5 * (boundary_control_loss(raw_u, q0, cond, ws, wg)
+                            + boundary_control_loss(raw_c, q0, cond, ws, wg))
+        loss_smooth = 0.5 * (control_smoothness_loss(pred_u, q0)
+                             + control_smoothness_loss(pred_c, q0))
+        basis = self.codec.basis.to(self.device)
+        loss_curve = 0.5 * (curve_smoothness_loss(pred_u, q0, basis)
+                            + curve_smoothness_loss(pred_c, q0, basis))
+        # ONE safety term: the same continuous constraint set the ALM projects onto
+        loss_safe = continuous_safety_loss(pred_c, pack, reduction="none")
         # every term is a per-sample vector; the joint objective is its batch mean
-        loss = total_loss(loss_u, loss_c, loss_align, loss_col, loss_corr,
-                          self.weights).mean()
+        loss = total_loss(loss_u, loss_c, loss_align, loss_bound, loss_smooth,
+                          loss_curve, loss_safe, self.weights).mean()
 
         stats = {
             "loss": float(loss.item()),
             "loss_u": float(loss_u.mean().item()),
             "loss_c": float(loss_c.mean().item()),
             "loss_align": float(loss_align.mean().item()),
-            "loss_collision": float(loss_col.mean().item()),
-            "loss_corridor": float(loss_corr.mean().item()),
+            "loss_boundary": float(loss_bound.mean().item()),
+            "loss_smooth": float(loss_smooth.mean().item()),
+            "loss_curve": float(loss_curve.mean().item()),
+            "loss_safe": float(loss_safe.mean().item()),
+            "loss_safe_max": float(loss_safe.max().item()),
             "corridor_pieces": int(pack.piece_mask.sum().item()) if pack is not None else 0,
             "corridor_samples": int((pack.piece_mask.any(dim=1)).sum().item())
                                if pack is not None else 0,
@@ -212,13 +227,14 @@ class DualBranchTrainer:
                 stats = self.train_step(batch, cache, index)
                 steps += 1
                 if steps % max(1, int(log_every)) == 0:
-                    print("epoch %d step %4d | loss %.5f (u %.5f c %.5f align %.5f "
-                          "col %.5f corr %.5f) gate %.3f %.1fs"
+                    print("epoch %d step %4d | loss %.5f (u %.4f c %.4f align %.4f "
+                          "bnd %.4f sm %.4f crv %.4f safe %.4f/max %.3f) gate %.3f %.1fs"
                           % (epoch + 1, steps, stats["loss"], stats["loss_u"],
                              stats["loss_c"], stats["loss_align"],
-                             stats["loss_collision"], stats["loss_corridor"],
-                             stats["safety_gate_mean"], time.perf_counter() - start),
-                          flush=True)
+                             stats["loss_boundary"], stats["loss_smooth"],
+                             stats["loss_curve"], stats["loss_safe"],
+                             stats["loss_safe_max"], stats["safety_gate_mean"],
+                             time.perf_counter() - start), flush=True)
                 if max_steps and steps >= int(max_steps):
                     break
             if ckpt_dir:

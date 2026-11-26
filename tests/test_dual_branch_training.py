@@ -91,8 +91,10 @@ def test_joint_loss_is_the_documented_weighted_sum(pipeline, cfg):
     w = trainer.weights
     expected = (w["lambda_c"] * stats["loss_c"] + w["lambda_u"] * stats["loss_u"]
                 + w["lambda_align"] * stats["loss_align"]
-                + w["lambda_collision"] * stats["loss_collision"]
-                + w["lambda_corridor"] * stats["loss_corridor"])
+                + w["lambda_boundary"] * stats["loss_boundary"]
+                + w["lambda_smooth"] * stats["loss_smooth"]
+                + w["lambda_curve"] * stats["loss_curve"]
+                + w["lambda_safe"] * stats["loss_safe"])
     assert abs(stats["loss"] - expected) < 1e-4
 
 
