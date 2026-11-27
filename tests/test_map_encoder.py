@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import torch
 
-from gp_diffuser.map_encoder.resunet import ResUNet
+from gp_diffuser.vendor.ellipsenet.models.resunet import ResUNet
 
 
 def test_bottleneck_and_full_shapes(pipeline, sample):
@@ -22,8 +22,10 @@ def test_bottleneck_is_enc3_not_decoder_output(pipeline, sample):
     item, _ = sample
     net = pipeline["net"]
     occ = item["occupancy"][None]
+    from gp_diffuser.map_encoder.frozen_encoder import _resunet_features
+
     with torch.no_grad():
-        out = net.occ_unet.forward_with_features(occ)
+        out = _resunet_features(net.occ_unet, occ)
         manual = net.occ_unet.enc3(net.occ_unet.down3(
             net.occ_unet.enc2(net.occ_unet.down2(net.occ_unet.enc1(
                 net.occ_unet.down1(net.occ_unet.stem(occ)))))))
@@ -35,13 +37,13 @@ def test_bottleneck_is_enc3_not_decoder_output(pipeline, sample):
 def test_encoder_runs_exactly_once_per_call(pipeline, sample, monkeypatch):
     item, _ = sample
     calls = {"occ": 0, "sdf": 0}
-    original = ResUNet.forward_with_features
+    original = ResUNet.forward
 
     def counting(self, x):
         calls["occ" if self is pipeline["net"].occ_unet else "sdf"] += 1
         return original(self, x)
 
-    monkeypatch.setattr(ResUNet, "forward_with_features", counting)
+    monkeypatch.setattr(ResUNet, "forward", counting)
     pipeline["map_encoder"].encode(item["occupancy"][None], item["sdf"][None])
     assert calls == {"occ": 1, "sdf": 1}
 

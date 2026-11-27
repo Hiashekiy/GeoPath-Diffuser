@@ -93,7 +93,7 @@
     {
       "check": "heading error reported",
       "ok": true,
-      "detail": "[33.0, 0.9] deg"
+      "detail": "[0.0, 0.0] deg"
     },
     {
       "check": "ALM never fed back to the network (no feedback key in the trace)",
@@ -111,22 +111,22 @@
     "collision_free": true,
     "collision_intervals": 0,
     "min_clearance_m": 1.5,
-    "mean_clearance_m": 3.482914221227109,
-    "length_m": 38.68439268799265,
-    "mean_curvature": 8.670518007066601,
-    "max_curvature": 78.03426370511855,
+    "mean_clearance_m": 3.3002642558838073,
+    "length_m": 39.06183983556213,
+    "mean_curvature": 17.927012442755057,
+    "max_curvature": 626.8905065870009,
     "end_to_end_distance_m": 34.558826658322765,
-    "num_dense_samples": 898
+    "num_dense_samples": 891
   },
   "timing": {
-    "map_encode_s": 0.13373419998970348,
-    "initial_diffusion_s": 0.22460580000188202,
-    "search_s": 0.21855720000166912,
-    "ellipse_s": 0.03841350000584498,
-    "corridor_s": 0.0006213000015122816,
-    "safety_total_s": 0.26571349998994265,
-    "guided_diffusion_s": 0.15481340000405908,
-    "final_validation_s": 0.006135899995570071,
-    "total_s": 0.7862615999911213
+    "map_encode_s": 0.1284546999959275,
+    "initial_diffusion_s": 0.2617805000045337,
+    "search_s": 0.01837489998433739,
+    "ellipse_s": 0.17632980001508258,
+    "corridor_s": 0.000827599986223504,
+    "safety_total_s": 0.21232970000710338,
+    "guided_diffusion_s": 0.15561270000762306,
+    "final_validation_s": 0.007391899998765439,
+    "total_s": 0.7712478000030387
   }
 }

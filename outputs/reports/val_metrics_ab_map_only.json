@@ -1,0 +1,21 @@
+{
+  "split": "val",
+  "batches": 8,
+  "use_safety": false,
+  "mean": {
+    "loss": 0.015484573901630938,
+    "loss_u": 0.008400444028666243,
+    "loss_c": 0.0,
+    "loss_align": 0.0,
+    "loss_boundary": 0.00018547268336988054,
+    "loss_smooth": 0.03732010396197438,
+    "loss_curve": 0.00966012931894511,
+    "loss_safe": 0.0,
+    "loss_safe_max": 0.0,
+    "corridor_pieces": 0.0,
+    "corridor_samples": 0.0,
+    "safety_gate_mean": 0.10000000149011612,
+    "timestep_mean": 495.171875,
+    "batch": 16.0
+  }
+}

@@ -463,8 +463,17 @@ def build_safety_corridor(
     def _gamma(s_value: float) -> np.ndarray:
         if gamma is None:
             raise ValueError("bridge requires the dense Skeleton Gamma")
-        coords = torch.as_tensor(np.asarray(gamma, dtype=np.float32),
-                                 device=dev, dtype=dt)[None]
+        # ``gamma`` may arrive as a CUDA tensor (the sampler builds it from the
+        # model output); np.asarray() on that raises and the bridge used to fail
+        # silently, disabling the ALM exactly where it was needed.
+        if torch.is_tensor(gamma):
+            dense = gamma.detach().to(device="cpu", dtype=torch.float32).numpy()
+            coords = torch.as_tensor(dense, device=dev, dtype=dt)
+            if coords.dim() == 2:
+                coords = coords[None]
+        else:
+            coords = torch.as_tensor(np.asarray(gamma, dtype=np.float32),
+                                     device=dev, dtype=dt)[None]
         if torch.is_tensor(gamma_lengths):
             lengths = gamma_lengths.to(dev).long().reshape(-1)
             if lengths.numel() == 1:

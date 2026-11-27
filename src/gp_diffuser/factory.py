@@ -22,7 +22,7 @@ from .config import cfg_get
 from .diffusion.sampler_conditional_dit import ConditionalDiTSampler
 from .diffusion.schedule import NoiseSchedule
 from .frames import SceneTransform
-from .guidance.search import GuidanceFieldSearch
+from .guidance.reference_search import ReferenceGuidanceSearch
 from .map_encoder.frozen_encoder import FrozenMapEncoder
 from .models.conditional_dit import ARCHITECTURE_VERSION, ConditionalDiT
 from .models.condition_encoders import MapConditionEncoder
@@ -117,7 +117,7 @@ def build_pipeline(cfg: dict, device: str = "cpu", with_pretrained: bool = True,
     # P2-2: q_sample indexes the schedule tables with the timestep tensor, so
     # they must live on the same device as t
     schedule.to(device)
-    guidance = GuidanceFieldSearch(cfg.get("guidance") or {},
+    guidance = ReferenceGuidanceSearch(cfg.get("guidance") or {},
                                   res_m=float(cfg_get(cfg, "dataset.res_m", 0.25)))
 
     net = None

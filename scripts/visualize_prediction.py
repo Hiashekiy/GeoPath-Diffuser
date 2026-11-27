@@ -115,6 +115,9 @@ def main() -> int:
     parser.add_argument("--random", type=int, default=20)
     parser.add_argument("--pick-seed", type=int, default=0)
     parser.add_argument("--steps", type=int, default=20)
+    parser.add_argument("--ncols", type=int, default=5)
+    parser.add_argument("--safety-mode", default="full",
+                        choices=["full", "map_only", "no_alm"])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--outdir", default="outputs/figures/predictions")
     opts = parser.parse_args()
@@ -140,7 +143,8 @@ def main() -> int:
         out = sampler.sample(item["occupancy"][None], item["sdf"][None],
                              item["start_goal"][None], heading=item["heading"][None],
                              heading_valid=item["heading_valid"][None],
-                             steps=opts.steps, seed=opts.seed, record_curves=True)
+                             steps=opts.steps, seed=opts.seed, record_curves=True,
+                             safety_mode=opts.safety_mode)
         occ = _np(item["occupancy"][0])
         metrics = trajectory_metrics(_np(out["trajectory_m"][0]), occ, _np(item["sdf"][0]),
                                      dataset.res_m)
@@ -210,7 +214,7 @@ def main() -> int:
         plt.close(fig)
 
         # ---- per-step panels with the full safety geometry ------------------
-        ncols = 5
+        ncols = max(1, int(opts.ncols))
         nrows = int(np.ceil(len(trace) / ncols))
         fig, axes = plt.subplots(nrows, ncols, figsize=(2.9 * ncols, 2.9 * nrows))
         axes = np.atleast_2d(axes)

@@ -25,7 +25,7 @@ to plain endpoint hard-conditioning (span 1 == the old behaviour).
 """
 from __future__ import annotations
 
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -83,7 +83,9 @@ class BoundaryDecoder(nn.Module):
         wg[C - k:] = torch.flip(w, dims=[0])
         return ws, wg
 
-    def forward(self, q_raw: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+    def forward(self, q_raw: torch.Tensor, cond: torch.Tensor,
+                heading: Optional[torch.Tensor] = None,
+                heading_valid: Optional[torch.Tensor] = None) -> torch.Tensor:
         """``q_raw [B,C,2]``, ``cond [B,2,2]`` -> ``q`` with exact endpoints."""
         if q_raw.dim() != 3 or q_raw.shape[-1] != 2:
             raise ValueError("q_raw must be [B,C,2], got %s" % (tuple(q_raw.shape),))
@@ -91,5 +93,80 @@ class BoundaryDecoder(nn.Module):
         ws, wg = self.weights(C, device=q_raw.device, dtype=q_raw.dtype)
         e_s = cond[:, 0] - q_raw[:, 0]
         e_g = cond[:, 1] - q_raw[:, C - 1]
-        return (q_raw + ws[None, :, None] * e_s[:, None, :]
-                + wg[None, :, None] * e_g[:, None, :])
+        q = (q_raw + ws[None, :, None] * e_s[:, None, :]
+             + wg[None, :, None] * e_g[:, None, :])
+        if heading is None:
+            return q
+        return self.align_tangents(q, heading, heading_valid)
+
+    # ------------------------------------------------------------- tangents
+    def tangent_weights(self, num_controls: int, device=None, dtype=None):
+        """``(t^s, t^g)``: like ``weights`` but ZERO on the endpoint control.
+
+        The endpoint itself must not move (it is already exact), so the tangency
+        correction has to vanish at ``Q_0`` / ``Q_{C-1}`` and peak at its
+        neighbour - that is what makes ``Q*_1 - Q*_0`` exactly the heading while
+        ``Q*_0`` stays on the start point.
+        """
+        C = int(num_controls)
+        dtype = dtype or self.profile.dtype
+        device = device or self.profile.device
+        k = max(2, min(self.span, C // 2))
+        w = self.profile[:k].to(device=device, dtype=dtype)
+        ts = torch.zeros(C, device=device, dtype=dtype)
+        tg = torch.zeros(C, device=device, dtype=dtype)
+        # weight 1.0 on the NEIGHBOUR so the segment direction is exact, then the
+        # remaining profile entries fade the correction out for smoothness
+        ts[1] = 1.0
+        tg[C - 2] = 1.0
+        if k > 2:
+            ts[2:k] = w[2:k]
+            # mirrored window: Q_{C-k} .. Q_{C-3} get the faded weights
+            tg[C - k:C - 2] = torch.flip(w[2:k], dims=[0])
+        return ts, tg
+
+    def align_tangents(self, q: torch.Tensor, heading: torch.Tensor,
+                       heading_valid: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Make the first/last control segment point along the requested headings.
+
+        ``heading`` ``[B,2,2]`` is ``(start, goal)`` as a direction (not necessarily
+        unit).  The correction is a pure translation of the neighbouring controls,
+        scaled by the same decaying profile, so:
+
+        * ``Q_0`` / ``Q_{C-1}`` do not move (position stays exact),
+        * ``Q_1 - Q_0`` and ``Q_{C-1} - Q_{C-2}`` become exactly the headings,
+        * the rest of the polygon only moves coherently (no kink at the ends).
+        """
+        if heading.dim() != 3 or heading.shape[-1] != 2:
+            raise ValueError("heading must be [B,2,2], got %s" % (tuple(heading.shape),))
+        C = int(q.shape[-2])
+        if C < 3:
+            return q
+        ts, tg = self.tangent_weights(C, device=q.device, dtype=q.dtype)
+
+        target = heading.to(q.dtype)
+        target = target / target.norm(dim=-1, keepdim=True).clamp_min(1e-9)
+        if heading_valid is not None:
+            valid = heading_valid.to(torch.bool)
+            target = torch.where(valid[:, :, None], target,
+                                 torch.zeros_like(target))
+
+        d_s = q[:, 1] - q[:, 0]
+        len_s = d_s.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+        delta_s = len_s * target[:, 0] - d_s
+
+        # `d_g` points BACKWARDS (C-2 -> C-1), while the requested heading is the
+        # forward tangent at u=1, so the target direction is -h_g
+        d_g = q[:, C - 2] - q[:, C - 1]
+        len_g = d_g.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+        delta_g = len_g * (-target[:, 1]) - d_g
+        if heading_valid is not None:
+            # an invalid end must be left EXACTLY as it was: zeroing only the target
+            # would collapse the end segment onto the endpoint
+            keep = heading_valid.to(torch.bool)
+            delta_s = torch.where(keep[:, 0:1], delta_s, torch.zeros_like(delta_s))
+            delta_g = torch.where(keep[:, 1:2], delta_g, torch.zeros_like(delta_g))
+
+        q = q + ts[None, :, None] * delta_s[:, None, :] \
+              + tg[None, :, None] * delta_g[:, None, :]
+        return q

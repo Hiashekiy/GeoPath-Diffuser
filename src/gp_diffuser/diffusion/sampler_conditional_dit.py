@@ -87,6 +87,14 @@ class ConditionalDiTSampler:
         cfg.setdefault("scene_to_meter", self.transform.scale)
         return cfg
 
+    def _alm_mode(self) -> str:
+        """``"trajsafe"`` (default): TrajSafe's closed loop, full-ellipse corridor.
+
+        ``"legacy_local"`` keeps the previous behaviour (regions only inside the
+        collision intervals of the curve) for A/B comparison.
+        """
+        return str((self.cfg.get("alm") or {}).get("mode_impl", "trajsafe"))
+
     @torch.no_grad()
     def _decode(self, controls: torch.Tensor, points: Optional[int] = None) -> torch.Tensor:
         if points is None:
@@ -210,7 +218,7 @@ class ConditionalDiTSampler:
 
         # ---- Step 1 setup: noise + hard endpoints --------------------------
         q = torch.randn(B, C, 2, device=device, dtype=torch.float32)
-        q = self.boundary(q, start_goal)
+        q = self.boundary(q, start_goal, heading, heading_valid)
         T = int(self.schedule.num_timesteps)
         times = pick_times(T, steps) or list(range(T))
         reverse = list(reversed(times))
@@ -246,7 +254,7 @@ class ConditionalDiTSampler:
                               safety_mask=safety_mask if use_safety else None)
             # P1-3: the network has no hard endpoint conditioning, so lock the
             # predicted polygon BEFORE decoding, searching and projecting.
-            pred = self.boundary(pred, start_goal)
+            pred = self.boundary(pred, start_goal, heading, heading_valid)
             dt_fwd = time.perf_counter() - t_fwd
             key = "guided_diffusion_s" if use_safety else "initial_diffusion_s"
             timing[key] = timing.get(key, 0.0) + dt_fwd
@@ -291,36 +299,62 @@ class ConditionalDiTSampler:
                 if bool(active.any()):
                     from .bspline_alm import bspline_alm_correct
                     t0 = time.perf_counter()
-                    q_safe, lam_new, stats = bspline_alm_correct(
-                        pred, pack, self.codec, lam=lam if inherit_dual else None,
-                        config=alm_cfg, inner_steps=int(alm_cfg.get("inner_steps", 6)))
-                    timing["alm_s"] = timing.get("alm_s", 0.0) + time.perf_counter() - t0
-                    before = self._decode(pred, dense_points)
-                    after = self._decode(q_safe, dense_points)
-                    col_before = self._collision_fractions(occupancy, before)
-                    col_after = self._collision_fractions(occupancy, after)
-                    viol_before = stats["max_violation_before"].to(device)
-                    viol_after = stats["max_violation_after"].to(device)
-                    # P1-5: never accept a correction that makes the sample worse
-                    accept = self.accept_correction(active, col_before, col_after,
-                                                    viol_before, viol_after)
-                    q_safe = torch.where(accept[:, None, None], q_safe, pred)
-                    if inherit_dual:
-                        lam = lam_new
-                    alm_accepted += int(accept.sum().item())
-                    alm_rejected += int((active & ~accept).sum().item())
-                    step_alm = {
-                        "active_samples": int(active.sum().item()),
-                        "accepted_samples": int(accept.sum().item()),
-                        "max_violation_before": float(viol_before.mean().item()),
-                        "max_violation_after": float(viol_after.mean().item()),
-                        "feasible_rate": float(stats["constraint_feasible_rate"].mean()),
-                        "mean_correction_m": float(stats["mean_curve_correction_m"].mean()),
-                        "max_correction_m": float(stats["max_curve_correction_m"].mean()),
-                        "collision_before": float(col_before.mean().item()),
-                        "collision_after": float(col_after.mean().item()),
-                        "accepted_mask": [bool(v) for v in accept.detach().cpu()],
-                    }
+                    if self._alm_mode() == "trajsafe":
+                        # VERBATIM TrajSafe usage (src/diffusion/sampler.py): the
+                        # corrected prediction enters the DDIM update unguarded, the
+                        # dual is warm started across reverse steps.  No extra
+                        # acceptance test -- that was a GeoPath-only addition.
+                        q_safe, lam_new, st = bspline_alm_correct(
+                            pred, pack, self.codec,
+                            lam=(lam if inherit_dual else None), config=alm_cfg,
+                            inner_steps=int(alm_cfg.get("inner_steps", 6)))
+                        if inherit_dual:
+                            lam = lam_new
+                        accept = active.clone()
+                        q_safe = torch.where(active[:, None, None], q_safe, pred)
+                        alm_accepted += int(active.sum().item())
+                        step_alm = {
+                            "active_samples": int(active.sum().item()),
+                            "accepted_samples": int(active.sum().item()),
+                            "max_violation_before": float(st["max_violation_before"].mean()),
+                            "max_violation_after": float(st["max_violation_after"].mean()),
+                            "feasible_rate": float(st["constraint_feasible_rate"].mean()),
+                            "mean_correction_m": float(st["mean_curve_correction_m"].mean()),
+                            "max_correction_m": float(st["max_curve_correction_m"].mean()),
+                            "accepted_mask": [bool(v) for v in accept.detach().cpu()],
+                        }
+                        timing["alm_s"] = timing.get("alm_s", 0.0) + time.perf_counter() - t0
+                    else:
+                        q_safe, lam_new, stats = bspline_alm_correct(
+                            pred, pack, self.codec, lam=lam if inherit_dual else None,
+                            config=alm_cfg, inner_steps=int(alm_cfg.get("inner_steps", 6)))
+                        timing["alm_s"] = timing.get("alm_s", 0.0) + time.perf_counter() - t0
+                        before = self._decode(pred, dense_points)
+                        after = self._decode(q_safe, dense_points)
+                        col_before = self._collision_fractions(occupancy, before)
+                        col_after = self._collision_fractions(occupancy, after)
+                        viol_before = stats["max_violation_before"].to(device)
+                        viol_after = stats["max_violation_after"].to(device)
+                        # P1-5: never accept a correction that makes the sample worse
+                        accept = self.accept_correction(active, col_before, col_after,
+                                                        viol_before, viol_after)
+                        q_safe = torch.where(accept[:, None, None], q_safe, pred)
+                        if inherit_dual:
+                            lam = lam_new
+                        alm_accepted += int(accept.sum().item())
+                        alm_rejected += int((active & ~accept).sum().item())
+                        step_alm = {
+                            "active_samples": int(active.sum().item()),
+                            "accepted_samples": int(accept.sum().item()),
+                            "max_violation_before": float(viol_before.mean().item()),
+                            "max_violation_after": float(viol_after.mean().item()),
+                            "feasible_rate": float(stats["constraint_feasible_rate"].mean()),
+                            "mean_correction_m": float(stats["mean_curve_correction_m"].mean()),
+                            "max_correction_m": float(stats["max_curve_correction_m"].mean()),
+                            "collision_before": float(col_before.mean().item()),
+                            "collision_after": float(col_after.mean().item()),
+                            "accepted_mask": [bool(v) for v in accept.detach().cpu()],
+                        }
                     alm_stats.append(step_alm)
                     q0_used = q_safe
 
@@ -332,7 +366,7 @@ class ConditionalDiTSampler:
                 sa_s, s1_s = sqrt_ab[int(t_prev)], sqrt_1ma[int(t_prev)]
                 eps = (q - sa_t * q0_used) / s1_t.clamp_min(1e-8)
                 q = sa_s * q0_used + s1_s * eps
-            q = self.boundary(q, start_goal)
+            q = self.boundary(q, start_goal, heading, heading_valid)
             if return_trace:
                 entry = {"forward": i, "t": int(t_cur), "t_prev": int(t_prev),
                          "branch": "safety" if use_safety else "map_only",
@@ -461,7 +495,7 @@ class ConditionalDiTSampler:
         # the region builder exponentiates the log-axes, so it needs scene units
         shape4_scene = ellipse_shape4_to_scene(safety["ellipse_shape4"], scale)
 
-        # ---- local corridors, one table per sample ------------------------
+        # ---- convex corridor + constraint pack -----------------------------
         t0 = time.perf_counter()
         Q = int(centers_scene.shape[1])
         anchors = torch.linspace(0.0, 1.0, Q, dtype=torch.float64, device=device)
@@ -469,21 +503,39 @@ class ConditionalDiTSampler:
         infos: List[Dict] = []
         path_scene = torch.as_tensor(
             tf.to_scene(path_m.detach().cpu().numpy()), dtype=torch.float32, device=device)
-        for local_i, b in enumerate(ok_idx):
-            table, info = self._region_table(occupancy[b:b + 1], centers_scene[local_i],
-                                             shape4_scene[local_i], anchors,
-                                             curve_scene[b], path_scene[local_i],
-                                             corridor_cfg, scope="local")
-            tables.append(table)
-            local_cells[b] = int(info["local_cells"])
-            infos.append({"index": int(b), **info})
-        timing["corridor_s"] = time.perf_counter() - t0
-
-        # the ALM gets the full pack (local cells + map box), while the reported
-        # corridor violation and the training loss use the LOCAL cells only
-        pack = pack_from_tables(self.codec, tables, include_box=True, device=device)
-        pack_local = pack_from_tables(self.codec, tables, include_box=False,
-                                      device=device)
+        if self._alm_mode() == "trajsafe":
+            # VERBATIM TrajSafe construction (src/diffusion/alm_local.py): every
+            # predicted ellipse -> convex cell, gap filling, then one closed
+            # safety corridor per sample (overlap + bridge), then the Bezier
+            # constraint pack.  No collision-interval restriction.
+            pack, pack_local, corridors = self._full_corridor_pack(
+                occupancy, centers_scene, shape4_scene, anchors, path_m,
+                ok_idx, corridor_cfg)
+            for local_i, b in enumerate(ok_idx):
+                cor = corridors[local_i]
+                local_cells[b] = int(getattr(pack, "num_pieces", torch.zeros(B))[b]
+                                     if pack is not None else 0)
+                infos.append({"index": int(b),
+                              "local_cells": int(local_cells[b].item()),
+                              "valid": bool(getattr(cor, "valid", False)),
+                              "failure_reason": getattr(cor, "failure_reason", "") or "",
+                              "spans": None})
+            timing["corridor_s"] = time.perf_counter() - t0
+        else:
+            for local_i, b in enumerate(ok_idx):
+                table, info = self._region_table(
+                    occupancy[b:b + 1], centers_scene[local_i], shape4_scene[local_i],
+                    anchors, curve_scene[b], path_scene[local_i],
+                    corridor_cfg, scope="local")
+                tables.append(table)
+                local_cells[b] = int(info["local_cells"])
+                infos.append({"index": int(b), **info})
+            timing["corridor_s"] = time.perf_counter() - t0
+            # the ALM gets the full pack (local cells + map box), while the reported
+            # corridor violation and the training loss use the LOCAL cells only
+            pack = pack_from_tables(self.codec, tables, include_box=True, device=device)
+            pack_local = pack_from_tables(self.codec, tables, include_box=False,
+                                          device=device)
 
         # ---- scatter the per-sample geometry back to the full batch -------
         path_len = int(path_m.shape[1])
@@ -528,6 +580,66 @@ class ConditionalDiTSampler:
             "timing": timing,
         }
         return raw, search_stats
+
+    def _full_corridor_pack(self, occupancy, centers_scene, shape4_scene, anchors,
+                            path_m, ok_idx, corridor_cfg):
+        """TrajSafe's FULL construction: every ellipse -> corridor -> pack.
+
+        This is the sequence of ``vendor/trajsafe/alm_local.py`` (their
+        ``alm_closed_loop``), minus the ALM call itself:
+
+            EllipseRegionBuilder.build_from_ellipse -> per-query convex cells
+            densify_ellipses                        -> fill the corridor gaps
+            build_safety_corridor                   -> one closed corridor
+            build_constraint_pack                   -> Bezier-extracted constraints
+
+        Nothing here restricts the regions to the collision intervals; the whole
+        predicted ellipse chain is used, which is what the ALM was designed for.
+        """
+        from ..safety.bspline_constraints import build_constraint_pack
+        from ..safety.convex_region import EllipseRegionBuilder
+        from ..safety.safety_corridor import build_safety_corridor
+        from ..vendor.trajsafe.ellipse_densify import densify_ellipses
+
+        alm_cfg = self._alm_cfg()
+        region_cfg = dict(corridor_cfg.get("region") or {})
+        builder_cfg = {k: alm_cfg[k] for k in
+                       ("safety_margin", "obstacle_window_half", "obstacle_dilation",
+                        "corridor_chunk_size", "ellipse_axis_min", "ellipse_axis_max")
+                       if k in alm_cfg}
+        builder_cfg = {**region_cfg, **builder_cfg}
+        dens_cfg = dict(corridor_cfg.get("densify") or {})
+        dens_on = bool(dens_cfg.get("enabled", True))
+        path_scene_full = torch.as_tensor(
+            self.transform.to_scene(path_m.detach().cpu().numpy()),
+            dtype=torch.float32, device=self.device)
+
+        B = int(centers_scene.shape[0])
+        corridors: List[Optional[object]] = [None] * B
+        for local_i, b in enumerate(ok_idx):
+            builder = EllipseRegionBuilder(occupancy[b:b + 1].float(), builder_cfg)
+            c_b, s_b, a_b = centers_scene[local_i], shape4_scene[local_i], anchors
+            if dens_on:
+                c_np, s_np, a_np, _ = densify_ellipses(
+                    builder,
+                    c_b.detach().cpu().numpy(), s_b.detach().cpu().numpy(),
+                    a_b.detach().cpu().numpy(),
+                    min_overlap=float(dens_cfg.get(
+                        "min_overlap", corridor_cfg.get("min_overlap_ratio", 0.10))),
+                    max_insert_per_gap=int(dens_cfg.get("max_insert_per_gap", 2)),
+                    max_total=int(dens_cfg.get("max_total", 256)))
+                c_b = torch.as_tensor(c_np, dtype=centers_scene.dtype, device=self.device)
+                s_b = torch.as_tensor(s_np, dtype=shape4_scene.dtype, device=self.device)
+                a_b = torch.as_tensor(a_np, dtype=anchors.dtype, device=self.device)
+            corridors[b] = build_safety_corridor(
+                builder, c_b, s_b, a_b, gamma=path_scene_full[b],
+                gamma_lengths=max(int(path_scene_full.shape[1]), 1),
+                config=corridor_cfg)
+
+        pack = build_constraint_pack(
+            self.codec, corridors, device=self.device, dtype=torch.float32,
+            margin=float(alm_cfg.get("constraint_margin", 0.0)))
+        return pack, pack, corridors
 
     def _region_table(self, occupancy_b, centers_scene, shape4_scene, anchors,
                       curve_scene, path_scene, corridor_cfg, scope="local"):

@@ -11,6 +11,9 @@
 
 | # | 原始仓库 | 分支 | Commit | 原始文件 | 新文件 | 是否改算法逻辑 |
 |---|---|---|---|---|---|---|
+| 0a | TrajSafe-Diffuser | — | 本地 `references/` 副本 | `src/diffusion/alm_local.py` | `src/gp_diffuser/vendor/trajsafe/alm_local.py` | **否**（只改 6 行 import，其余逐字；本文件正文另注：迁移脚本 `scripts/migrate_trajsafe_alm.py`） |
+| 0b | TrajSafe-Diffuser | — | 同上 | `src/geometry/ellipse_densify.py` | `src/gp_diffuser/vendor/trajsafe/ellipse_densify.py` | **否**（只改 1 行 import） |
+| 0c | TrajSafe-Diffuser | — | 同上 | `src/diffusion/sampler.py`（第 294–417 行：`_dense_decode` / `_free_mask` / `_point_constraint_table` / `_point_violation` / `_membership_rate` / `dense_validation`） | `src/gp_diffuser/vendor/trajsafe/dense_validation.py` | **否**（逐字摘出） |
 | 1 | Astar-Diffusion | `main` | `39c31d42ebb13baf4f644e0a9136641232fd30f8` | `src/guidance_field/grid.py` | `src/gp_diffuser/guidance/grid.py` | 否（逐字节复制） |
 | 2 | Astar-Diffusion | `main` | `39c31d4…` | `src/guidance_field/config.py` | `src/gp_diffuser/guidance/config.py` | 否 |
 | 3 | Astar-Diffusion | `main` | `39c31d4…` | `src/guidance_field/propagation.py` | `src/gp_diffuser/guidance/propagation.py` | 否（仅 scipy 改为可选导入 + `auto` 后端回退 heap） |

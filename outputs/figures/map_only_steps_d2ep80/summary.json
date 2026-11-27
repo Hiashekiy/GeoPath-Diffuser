@@ -1,0 +1,44 @@
+[
+  {
+    "index": 0,
+    "valid": false,
+    "collision_rate": 0.07429972260256112,
+    "min_clearance_m": -0.14309864955400256,
+    "length_m": 24.775252438467927,
+    "gt_length_m": 23.928930282592773,
+    "corridor_cells": 0,
+    "corridor_scope": null,
+    "alm_steps": 0,
+    "seconds": 1.7992941999982577,
+    "safety_png": "outputs\\figures\\map_only_steps_d2ep80\\sample00_safety.png",
+    "steps_png": "outputs\\figures\\map_only_steps_d2ep80\\sample00_steps.png"
+  },
+  {
+    "index": 1,
+    "valid": false,
+    "collision_rate": 0.20382650339492964,
+    "min_clearance_m": -1.1422706493832928,
+    "length_m": 44.36468804439637,
+    "gt_length_m": 46.252052307128906,
+    "corridor_cells": 0,
+    "corridor_scope": null,
+    "alm_steps": 0,
+    "seconds": 1.3116127999965101,
+    "safety_png": "outputs\\figures\\map_only_steps_d2ep80\\sample01_safety.png",
+    "steps_png": "outputs\\figures\\map_only_steps_d2ep80\\sample01_steps.png"
+  },
+  {
+    "index": 2,
+    "valid": false,
+    "collision_rate": 0.1576907160859332,
+    "min_clearance_m": -2.4871342882848526,
+    "length_m": 44.21440500240315,
+    "gt_length_m": 53.16831588745117,
+    "corridor_cells": 0,
+    "corridor_scope": null,
+    "alm_steps": 0,
+    "seconds": 1.272447600000305,
+    "safety_png": "outputs\\figures\\map_only_steps_d2ep80\\sample02_safety.png",
+    "steps_png": "outputs\\figures\\map_only_steps_d2ep80\\sample02_steps.png"
+  }
+]

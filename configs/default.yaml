@@ -109,13 +109,18 @@ corridor:
 alm:
   enabled: true
   mode: "guided_bspline"
-  inner_steps: 6                     # alm.inner_steps (upstream)
+  inner_steps: 100                   # alm.inner_steps: upstream 6 never converged here
+                                     # (residual 3.1 m / 8.1% collision even at 200 with
+                                     # the old cap). Measured with cap 0.05: 0.03 m / 0%.
   step_size: 0.05                    # alm.step_size
   rho: 5.0                           # alm.rho
   proximity_weight: 1.0
   correction_smooth_weight: 0.1
   constraint_tol: 0.001
-  max_curve_step_scene: 0.20
+  max_curve_step_scene: 0.05         # 0.20 (=6.4 m per point per iteration) saturates the
+                                     # projection: the dual grows but the cap clamps the
+                                     # step, so the residual sticks at ~3 m and the curve
+                                     # still crosses obstacles
   inherit_dual_across_reverse_steps: true
   dense_verify_points: 512
 

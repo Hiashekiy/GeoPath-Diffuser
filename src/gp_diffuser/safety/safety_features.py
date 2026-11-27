@@ -131,13 +131,20 @@ def load_pathsafe(cfg: dict, device: str = "cpu", dtype=torch.float32) -> PathSa
     model_cfg = payload.get("cfg")
     if not isinstance(model_cfg, dict) or "model" not in model_cfg:
         raise KeyError("checkpoint %s has no embedded config" % path)
-    net = PathSafeEllipseNet(model_cfg)
-    missing, unexpected = net.load_state_dict(payload["model"], strict=False)
+    # the network class comes from the vendored PathSafe-Ellipse package
+    from .psenet_vendor import VendoredEllipseNet
+    from ..vendor.ellipsenet.models.psenet import PSENet
+    core = PSENet(model_cfg)
+    missing, unexpected = core.load_state_dict(payload["model"], strict=False)
     if missing or unexpected:
         raise RuntimeError(
             "PathSafe checkpoint does not match the network: missing=%s unexpected=%s"
             % (list(missing)[:8], list(unexpected)[:8]))
-    net.to(device=device, dtype=dtype)
+    core.to(device=device, dtype=dtype)
+    core.eval()
+    for param in core.parameters():
+        param.requires_grad_(False)
+    net = VendoredEllipseNet(core).to(device=device, dtype=dtype)
     net.eval()
     for param in net.parameters():
         param.requires_grad_(False)
@@ -147,6 +154,7 @@ def load_pathsafe(cfg: dict, device: str = "cpu", dtype=torch.float32) -> PathSa
         "epoch": payload.get("epoch"),
         "step": payload.get("step"),
         "params": sum(p.numel() for p in net.parameters()),
+        "implementation": "vendor/ellipsenet (upstream PSENet)",
     }
     return net
 
@@ -202,7 +210,9 @@ class SafetyConditionGenerator(nn.Module):
                 "ray_valid": torch.stack(rvalids).to(device),
             }
 
-        r_scene = float(occupancy.shape[-1]) * self.res_m
+        # upstream `r_scene` is the CELL SIZE in metres (their world_to_grid
+        # computes col = x / r_scene then normalises by the grid width)
+        r_scene = float(self.res_m)
         batch = {
             "occupancy": occupancy,
             "sdf": sdf,

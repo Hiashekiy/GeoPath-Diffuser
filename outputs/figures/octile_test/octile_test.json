@@ -1,0 +1,62 @@
+{
+  "map": "London_1_256_part_0_0.map",
+  "map_shape": [
+    512,
+    512
+  ],
+  "map_blocked": 0.271331787109375,
+  "window": [
+    0,
+    96
+  ],
+  "window_blocked": 0.111328125,
+  "resolution_m": 0.25,
+  "chord_m": 29.99270744697784,
+  "samples": [
+    {
+      "sample": 0,
+      "valid": true,
+      "collision_rate": 0.0,
+      "min_clearance_m": 3.8078866004943848,
+      "length_m": 30.00171453141221,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 1.486261399986688
+    },
+    {
+      "sample": 1,
+      "valid": true,
+      "collision_rate": 0.0,
+      "min_clearance_m": 3.8078866004943848,
+      "length_m": 30.00288435202174,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 0.8448730999953113
+    },
+    {
+      "sample": 2,
+      "valid": true,
+      "collision_rate": 0.0,
+      "min_clearance_m": 3.8078866004943848,
+      "length_m": 30.00186650803817,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 0.8841749999846797
+    },
+    {
+      "sample": 3,
+      "valid": true,
+      "collision_rate": 0.0,
+      "min_clearance_m": 3.8078866004943848,
+      "length_m": 30.00324081701751,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 0.8551992999855429
+    }
+  ],
+  "figure": "outputs\\figures\\octile_test\\octile_predictions.png"
+}

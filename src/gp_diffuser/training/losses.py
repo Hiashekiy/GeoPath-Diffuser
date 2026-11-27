@@ -51,6 +51,9 @@ DEFAULT_LOSS_WEIGHTS: Dict[str, float] = {
     "lambda_smooth": 0.15,
     "lambda_curve": 0.15,
     "lambda_safe": 0.15,
+    # privileged supervision: the same corridor set on the MAP-ONLY branch
+    # (0.0 = off, the historical objective)
+    "lambda_safe_u": 0.0,
 }
 
 
@@ -222,14 +225,18 @@ def continuous_safety_loss(controls: torch.Tensor, pack, margin: float = 0.0,
 def total_loss(loss_u: torch.Tensor, loss_c: torch.Tensor, loss_align: torch.Tensor,
                loss_boundary: torch.Tensor, loss_smooth: torch.Tensor,
                loss_curve: torch.Tensor, loss_safe: torch.Tensor,
-               weights: Dict[str, float]) -> torch.Tensor:
+               weights: Dict[str, float],
+               loss_safe_u: Optional[torch.Tensor] = None) -> torch.Tensor:
     """Weighted sum; every term is already a per-sample vector over the batch."""
     w = dict(DEFAULT_LOSS_WEIGHTS)
     w.update({k: float(v) for k, v in (weights or {}).items() if k in w})
-    return (w["lambda_c"] * loss_c
-            + w["lambda_u"] * loss_u
-            + w["lambda_align"] * loss_align
-            + w["lambda_boundary"] * loss_boundary
-            + w["lambda_smooth"] * loss_smooth
-            + w["lambda_curve"] * loss_curve
-            + w["lambda_safe"] * loss_safe)
+    value = (w["lambda_c"] * loss_c
+             + w["lambda_u"] * loss_u
+             + w["lambda_align"] * loss_align
+             + w["lambda_boundary"] * loss_boundary
+             + w["lambda_smooth"] * loss_smooth
+             + w["lambda_curve"] * loss_curve
+             + w["lambda_safe"] * loss_safe)
+    if loss_safe_u is not None:
+        value = value + w["lambda_safe_u"] * loss_safe_u
+    return value

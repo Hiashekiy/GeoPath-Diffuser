@@ -37,8 +37,12 @@ class DualBranchTrainer:
 
     def __init__(self, cfg: dict, model: ConditionalDiT, map_condition_encoder,
                  map_encoder, codec, schedule, device: str = "cpu",
-                 scene_scale: float = 32.0):
+                 scene_scale: float = 32.0, use_safety: bool = True):
         self.cfg = dict(cfg or {})
+        # ``use_safety=False`` is the ablation arm: the Map-only branch alone
+        # (no ellipse tokens, no alignment, no corridor term).  It shares every
+        # other term with the dual objective so the two arms are comparable.
+        self.use_safety = bool(use_safety)
         self.model = model.to(device)
         self.map_condition_encoder = map_condition_encoder.to(device)
         self.map_encoder = map_encoder.to(device)
@@ -48,6 +52,18 @@ class DualBranchTrainer:
         self.device = device
         self.scene_scale = float(scene_scale)
         train_cfg = dict(self.cfg.get("training") or {})
+        # "gt": the map-only branch is regressed on GT (original objective)
+        # "safety": it is distilled from the safety branch only (no GT at all)
+        self.u_target = str(train_cfg.get("u_target", "gt"))
+        if self.u_target not in ("gt", "safety"):
+            raise ValueError("training.u_target must be 'gt' or 'safety', got %r"
+                             % (self.u_target,))
+        # "raw": align the FREE network polygons (before the endpoint modulation)
+        # "final": align the endpoint-corrected polygons
+        self.align_space = str(train_cfg.get("align_space", "raw"))
+        if self.align_space not in ("raw", "final"):
+            raise ValueError("training.align_space must be 'raw' or 'final', got %r"
+                             % (self.align_space,))
         weights = dict(DEFAULT_LOSS_WEIGHTS)
         weights.update({k: float(v) for k, v in (self.cfg.get("loss_weights") or {}).items()
                         if k in weights})
@@ -115,13 +131,17 @@ class DualBranchTrainer:
         map_context = self.model.build_map_context(map_memory, cond, heading,
                                                   heading_valid)
 
-        safety_condition, tables = self._safety_conditions(cache, index)
-        safety_memory, safety_mask = self.model.build_safety_memory(
-            safety_condition["ellipse"], safety_condition["valid"])
-        # P1-2: the corridor loss must see the OBSTACLE cells only.  The map-box
-        # cells are a fallback that would teach the model to hug the map border.
-        pack = pack_from_tables(self.codec, tables, include_box=False,
-                                device=self.device)
+        safety_memory = safety_mask = None
+        pack = None
+        if self.use_safety:
+            safety_condition, tables = self._safety_conditions(cache, index)
+            safety_memory, safety_mask = self.model.build_safety_memory(
+                safety_condition["ellipse"], safety_condition["valid"])
+            # P1-2: the corridor loss must see the OBSTACLE cells only.  The
+            # map-box cells are a fallback that would teach the model to hug the
+            # map border.
+            pack = pack_from_tables(self.codec, tables, include_box=False,
+                                    device=self.device)
 
         # ---- the SAME noise and timestep for both branches ----------------
         T = int(self.schedule.num_timesteps)
@@ -133,28 +153,57 @@ class DualBranchTrainer:
         # the network emits a FREE control polygon; the fixed boundary decoder
         # turns it into an exact-endpoint polygon (never a teleport of Q_0/Q_{C-1})
         raw_u = self.model(q_t=q_t, t=t, map_context=map_context)
-        raw_c = self.model(q_t=q_t, t=t, map_context=map_context,
-                           safety_memory=safety_memory, safety_mask=safety_mask)
-        pred_u = self.boundary(raw_u, cond)
-        pred_c = self.boundary(raw_c, cond)
-
-        # ---- losses (TrajSafe-aligned) ------------------------------------
-        loss_u = control_x0_loss(pred_u, q0)          # interior controls only
-        loss_c = control_x0_loss(pred_c, q0)
-        loss_align = alignment_loss(pred_u, pred_c)
+        pred_u = self.boundary(raw_u, cond, heading, heading_valid)
         ws, wg = self.boundary.weights(q0.shape[1], device=self.device, dtype=q0.dtype)
-        loss_bound = 0.5 * (boundary_control_loss(raw_u, q0, cond, ws, wg)
-                            + boundary_control_loss(raw_c, q0, cond, ws, wg))
-        loss_smooth = 0.5 * (control_smoothness_loss(pred_u, q0)
-                             + control_smoothness_loss(pred_c, q0))
         basis = self.codec.basis.to(self.device)
-        loss_curve = 0.5 * (curve_smoothness_loss(pred_u, q0, basis)
-                            + curve_smoothness_loss(pred_c, q0, basis))
-        # ONE safety term: the same continuous constraint set the ALM projects onto
-        loss_safe = continuous_safety_loss(pred_c, pack, reduction="none")
-        # every term is a per-sample vector; the joint objective is its batch mean
-        loss = total_loss(loss_u, loss_c, loss_align, loss_bound, loss_smooth,
-                          loss_curve, loss_safe, self.weights).mean()
+        zero = q0.reshape(B, -1).sum(dim=1) * 0.0
+
+        if self.use_safety:
+            raw_c = self.model(q_t=q_t, t=t, map_context=map_context,
+                               safety_memory=safety_memory, safety_mask=safety_mask)
+            pred_c = self.boundary(raw_c, cond, heading, heading_valid)
+            # ---- losses (TrajSafe-aligned) --------------------------------
+            loss_c = control_x0_loss(pred_c, q0)
+            # the alignment lives on the FREE polygons by default: the endpoint
+            # modulation is a post-hoc fix-up, so aligning after it only aligns
+            # the fix-up (both branches are dragged to the same S/G there)
+            if self.align_space == "raw":
+                loss_align = control_x0_loss(raw_u, raw_c.detach())
+            else:
+                loss_align = alignment_loss(pred_u, pred_c)
+            if self.u_target == "safety":
+                # distillation only: the map-only branch is supervised by the
+                # safety branch, never by GT (no two-target average any more)
+                loss_u = zero
+                loss_bound = boundary_control_loss(raw_c, q0, cond, ws, wg)
+            else:
+                loss_u = control_x0_loss(pred_u, q0)      # interior controls only
+                loss_bound = 0.5 * (boundary_control_loss(raw_u, q0, cond, ws, wg)
+                                    + boundary_control_loss(raw_c, q0, cond, ws, wg))
+            loss_smooth = 0.5 * (control_smoothness_loss(pred_u, q0)
+                                 + control_smoothness_loss(pred_c, q0))
+            loss_curve = 0.5 * (curve_smoothness_loss(pred_u, q0, basis)
+                                + curve_smoothness_loss(pred_c, q0, basis))
+            # ONE safety term: the same continuous constraint set the ALM projects onto
+            loss_safe = continuous_safety_loss(pred_c, pack, reduction="none")
+            # privileged supervision: the SAME constraint set, on the map-only
+            # branch (a label, not an input - that branch still sees no ellipse)
+            loss_safe_u = (continuous_safety_loss(pred_u, pack, reduction="none")
+                           if self.weights.get("lambda_safe_u", 0.0) > 0 else None)
+            loss = total_loss(loss_u, loss_c, loss_align, loss_bound, loss_smooth,
+                              loss_curve, loss_safe, self.weights,
+                              loss_safe_u=loss_safe_u).mean()
+        else:
+            # ablation arm: the Map-only branch with the SAME non-safety terms
+            loss_c = loss_align = loss_safe = zero
+            loss_u = control_x0_loss(pred_u, q0)
+            loss_bound = boundary_control_loss(raw_u, q0, cond, ws, wg)
+            loss_smooth = control_smoothness_loss(pred_u, q0)
+            loss_curve = curve_smoothness_loss(pred_u, q0, basis)
+            w = self.weights
+            loss = (w["lambda_u"] * loss_u + w["lambda_boundary"] * loss_bound
+                    + w["lambda_smooth"] * loss_smooth
+                    + w["lambda_curve"] * loss_curve).mean()
 
         stats = {
             "loss": float(loss.item()),
@@ -166,6 +215,9 @@ class DualBranchTrainer:
             "loss_curve": float(loss_curve.mean().item()),
             "loss_safe": float(loss_safe.mean().item()),
             "loss_safe_max": float(loss_safe.max().item()),
+            "loss_safe_u": (0.0 if self.use_safety is False
+                            or self.weights.get("lambda_safe_u", 0.0) <= 0
+                            else float(loss_safe_u.mean().item())),
             "corridor_pieces": int(pack.piece_mask.sum().item()) if pack is not None else 0,
             "corridor_samples": int((pack.piece_mask.any(dim=1)).sum().item())
                                if pack is not None else 0,
@@ -206,18 +258,54 @@ class DualBranchTrainer:
         _loss, stats = self._compute(batch, cache, index)
         return stats
 
+    # --------------------------------------------------------------------- ckpt
+    def save_checkpoint(self, path: str, epoch: int, steps: int,
+                        with_optimizer: bool = False) -> str:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        payload = {"architecture_version": self.model.architecture_version,
+                   "model": self.model.state_dict(),
+                   "map_condition_encoder": self.map_condition_encoder.state_dict(),
+                   "config": self.model.config_dict(),
+                   "use_safety": self.use_safety,
+                   "u_target": self.u_target,
+                   "align_space": self.align_space,
+                   "epoch": int(epoch),
+                   "steps": int(steps)}
+        if with_optimizer:      # ~440 MB on top: only ``last.pt`` carries it
+            payload["optimizer"] = self.optimizer.state_dict()
+        torch.save(payload, path)
+        return path
+
+    def load_optimizer_state(self, payload: Dict) -> bool:
+        """Restore AdamW moments when the checkpoint carries them."""
+        state = (payload or {}).get("optimizer")
+        if not state:
+            return False
+        try:
+            self.optimizer.load_state_dict(state)
+            return True
+        except (ValueError, KeyError):
+            return False
+
     # --------------------------------------------------------------------- fit
     def fit(self, train_items: List[Dict], cache: Dict[str, np.ndarray],
             epochs: int = 1, batch_size: int = 4, log_every: int = 10,
             seed: int = 0, max_steps: Optional[int] = None,
-            val_fn=None, ckpt_dir: Optional[str] = None) -> Dict:
-        """Iterate the joint objective over ``train_items``."""
-        torch.manual_seed(int(seed))
-        generator = np.random.default_rng(int(seed))
+            val_fn=None, ckpt_dir: Optional[str] = None,
+            ckpt_every: int = 0, ckpt_prefix: str = "ckpt",
+            start_epoch: int = 0) -> Dict:
+        """Iterate the joint objective over ``train_items``.
+
+        ``start_epoch`` > 0 continues a previous run: the RNG streams are offset
+        by it so the continued epochs see fresh sample orders instead of
+        replaying the first ones.
+        """
+        torch.manual_seed(int(seed) + int(start_epoch))
+        generator = np.random.default_rng(int(seed) + int(start_epoch))
         n = len(train_items)
         steps = 0
         start = time.perf_counter()
-        for epoch in range(int(epochs)):
+        for epoch in range(int(start_epoch), int(start_epoch) + int(epochs)):
             order = generator.permutation(n)
             for begin in range(0, n, int(batch_size)):
                 index = order[begin:begin + int(batch_size)]
@@ -228,23 +316,24 @@ class DualBranchTrainer:
                 steps += 1
                 if steps % max(1, int(log_every)) == 0:
                     print("epoch %d step %4d | loss %.5f (u %.4f c %.4f align %.4f "
-                          "bnd %.4f sm %.4f crv %.4f safe %.4f/max %.3f) gate %.3f %.1fs"
+                          "bnd %.4f sm %.4f crv %.4f safe %.4f/max %.3f su %.4f) "
+                          "gate %.3f %.1fs"
                           % (epoch + 1, steps, stats["loss"], stats["loss_u"],
                              stats["loss_c"], stats["loss_align"],
                              stats["loss_boundary"], stats["loss_smooth"],
                              stats["loss_curve"], stats["loss_safe"],
-                             stats["loss_safe_max"], stats["safety_gate_mean"],
+                             stats["loss_safe_max"], stats["loss_safe_u"],
+                             stats["safety_gate_mean"],
                              time.perf_counter() - start), flush=True)
                 if max_steps and steps >= int(max_steps):
                     break
             if ckpt_dir:
-                os.makedirs(ckpt_dir, exist_ok=True)
-                torch.save({"architecture_version": self.model.architecture_version,
-                            "model": self.model.state_dict(),
-                            "map_condition_encoder": self.map_condition_encoder.state_dict(),
-                            "config": self.model.config_dict(),
-                            "epoch": epoch + 1,
-                            "steps": steps}, os.path.join(ckpt_dir, "last.pt"))
+                self.save_checkpoint(os.path.join(ckpt_dir, "last.pt"),
+                                     epoch + 1, steps, with_optimizer=True)
+                if ckpt_every and (epoch + 1) % int(ckpt_every) == 0:
+                    self.save_checkpoint(
+                        os.path.join(ckpt_dir, "%s_ep%03d.pt"
+                                     % (ckpt_prefix, epoch + 1)), epoch + 1, steps)
             if max_steps and steps >= int(max_steps):
                 break
         summary = {

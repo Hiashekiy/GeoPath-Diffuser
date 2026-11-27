@@ -16,6 +16,26 @@ import torch
 import torch.nn as nn
 
 
+def _resunet_features(net, x):
+    """Bottleneck (`enc3` output) + full-resolution output of a vendored ResUNet.
+
+    The vendored PathSafe-Ellipse `ResUNet.forward` returns only the final
+    tensor, so the bottleneck the DiT needs is captured with a forward hook
+    instead of re-implementing their encoder.
+    """
+    captured = {}
+
+    def _hook(_module, _inp, out):
+        captured["bottleneck"] = out
+
+    handle = net.enc3.register_forward_hook(_hook)
+    try:
+        full = net(x)
+    finally:
+        handle.remove()
+    return {"bottleneck": captured["bottleneck"], "full": full}
+
+
 class FrozenMapEncoder(nn.Module):
     """Read-only view over a (shared) :class:`PathSafeEllipseNet` instance.
 
@@ -65,10 +85,10 @@ class FrozenMapEncoder(nn.Module):
               "sdf_full":       [B,128,256,256],
             }
         """
-        occ_out = self.net.occ_unet.forward_with_features(occupancy)
+        occ_out = _resunet_features(self.net.occ_unet, occupancy)
         # the SDF encoder sees the same clipped input PSENet.forward uses
         sdf_in = torch.clamp(sdf / float(self.net.d_clip), -1.0, 1.0)
-        sdf_out = self.net.dist_unet.forward_with_features(sdf_in)
+        sdf_out = _resunet_features(self.net.dist_unet, sdf_in)
         features = {
             "occ_bottleneck": occ_out["bottleneck"].detach(),
             "sdf_bottleneck": sdf_out["bottleneck"].detach(),

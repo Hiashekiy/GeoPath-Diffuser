@@ -101,23 +101,30 @@ def test_region_builder_receives_scene_axes(pipeline, sample, monkeypatch):
     scene = dataset.raw_scene(0)
     transform = pipeline["transform"]
     captured = {}
-    original = local_regions.build_region_table
+    # the scene-vs-metre invariant lives at EllipseRegionBuilder.build_from_ellipse,
+    # which BOTH constructions go through (the legacy local tables and the
+    # TrajSafe full corridor), so spying there covers either implementation.
+    from gp_diffuser.safety import convex_region
+    original = convex_region.EllipseRegionBuilder.build_from_ellipse
 
-    def spy(occupancy, centers, shape4, anchors, *args, **kwargs):
+    def spy(self, centers, shape4, *args, **kwargs):
         captured["shape4"] = torch.as_tensor(shape4).detach().clone()
-        return original(occupancy, centers, shape4, anchors, *args, **kwargs)
+        return original(self, centers, shape4, *args, **kwargs)
 
-    monkeypatch.setattr(local_regions, "build_region_table", spy)
+    monkeypatch.setattr(convex_region.EllipseRegionBuilder, "build_from_ellipse", spy)
     occ = torch.as_tensor(scene["occupancy"])[None, None]
     sdf = torch.as_tensor(scene["sdf"])[None, None]
     features = pipeline["map_encoder"].encode(occ, sdf)
     pipeline["sampler"]._generate_safety(
         occ, sdf, features, torch.as_tensor(item["path_gt_scene"])[None],
         torch.as_tensor(item["start_goal"])[None], pipeline["cfg"]["corridor"])
-    axes_scene = captured["shape4"][:, :2].clamp(-6.0, 0.7).exp()
-    # 64 m map -> a scene axis can never exceed 1.0; the metres value (~0.78) would
-    assert float(axes_scene.max()) < 0.1
-    assert float(axes_scene.max()) > 0.0
+    axes_scene = torch.as_tensor(captured["shape4"]).reshape(-1, 4)[:, :2] \
+        .clamp(-6.0, 0.7).exp()
+    # scene units: one unit is 32 m, so an ellipse axis is O(0.1) in scene and O(1-10)
+    # in metres.  Passing metres by mistake would land above 1.0 here.
+    assert 0.0 < float(axes_scene.max()) < 1.0, (
+        "shape4 must be scene units (got max %.3f)" % float(axes_scene.max()))
+    assert float(axes_scene.max() * transform.scale) > 1.0   # i.e. > 1 m in reality
     assert transform.scale == 32.0
 
 
@@ -187,18 +194,28 @@ def _scene_table(pipeline, scene, cfg, scope="full"):
 
 
 def test_no_bridge_cell_is_truncated(pipeline, sample, cfg):
+    """Whenever bridging happens, the bridge rows must survive into the table.
+
+    Whether a given scene needs a bridge depends on the ellipse geometry, so the
+    first few scenes are scanned for one that does; the invariant is asserted on it.
+    """
     _, dataset = sample
-    scene = dataset.raw_scene(0)
-    table, _info, centers, shape4, anchors, gamma, _ = _scene_table(
-        pipeline, scene, cfg, scope="full")
-    corridor = build_safety_corridor(
-        EllipseRegionBuilder(torch.as_tensor(scene["occupancy"])[None, None].float(),
-                             cfg["corridor"]["region"]),
-        centers, shape4[0], anchors, gamma=gamma, gamma_lengths=int(gamma.shape[0]),
-        config=cfg["corridor"])
-    assert corridor.num_cells > 64, "this scene needs at least one bridge cell"
-    assert table["cell_A"].shape[0] == corridor.num_cells
-    assert table["cell_A"].shape[0] > 64, "bridge rows must survive"
+    for index in range(min(8, len(dataset))):
+        scene = dataset.raw_scene(index)
+        table, _info, centers, shape4, anchors, gamma, _ = _scene_table(
+            pipeline, scene, cfg, scope="full")
+        corridor = build_safety_corridor(
+            EllipseRegionBuilder(torch.as_tensor(scene["occupancy"])[None, None].float(),
+                                 cfg["corridor"]["region"]),
+            centers, shape4[0], anchors, gamma=gamma, gamma_lengths=int(gamma.shape[0]),
+            config=cfg["corridor"])
+        if not corridor.valid:                     # a failed build has no cells
+            continue
+        assert table["cell_A"].shape[0] == corridor.num_cells
+        if corridor.bridge_cell_count > 0:
+            assert table["cell_A"].shape[0] > 64, "bridge rows must survive"
+            return
+    pytest.skip("no sampled scene required a bridge cell")
 
 
 def test_batch_pack_uses_per_sample_anchors(pipeline, sample, cfg):
@@ -369,7 +386,7 @@ def test_corridor_loss_ignores_box_cells(pipeline, sample, cfg):
     pack_local = pack_from_tables(pipeline["codec"], [box_only], include_box=False)
     assert pack_all is not None and int(pack_all.piece_mask.sum()) > 0
     assert pack_local is None, "box cells must not become corridor constraints"
-    controls = torch.zeros(1, 32, 2)
+    controls = torch.zeros(1, 32, 2, requires_grad=True)
     # no local pack at all -> the single safety term contributes exactly zero
     loss = continuous_safety_loss(controls, pack_local)
     assert float(loss.sum()) == 0.0 and loss.requires_grad

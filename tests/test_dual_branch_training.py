@@ -139,3 +139,126 @@ def test_no_phased_training_switches(pipeline, cfg):
     # both branches saw a GT loss in the very first iteration
     assert trainer.history[-1]["loss_u"] > 0
     assert trainer.history[-1]["loss_c"] > 0
+
+def test_map_only_arm_never_touches_the_safety_chain(pipeline, cfg, fresh_models):
+    """``use_safety=False`` is the ablation arm: one map-only forward, no safety."""
+    from gp_diffuser.factory import build_codec, build_schedule
+    model, encoder = fresh_models
+    trainer = DualBranchTrainer(cfg, model, encoder, pipeline["map_encoder"],
+                                build_codec(cfg), build_schedule(cfg), device="cpu",
+                                scene_scale=pipeline["transform"].scale,
+                                use_safety=False)
+    dataset = SyntheticTrajectoryDataset(cfg, "test")
+    items = [dataset[i] for i in range(len(dataset))]
+
+    seen = []
+    original = type(model).forward
+
+    def spy(self, *args, **kwargs):
+        seen.append(kwargs.get("safety_memory"))
+        return original(self, *args, **kwargs)
+
+    type(model).forward = spy
+    try:
+        stats = trainer.train_step(items, None, np.arange(len(items)))
+    finally:
+        type(model).forward = original
+
+    assert seen == [None], "the ablation arm must run exactly one map-only forward"
+    assert stats["loss_c"] == 0.0 and stats["loss_align"] == 0.0
+    assert stats["loss_safe"] == 0.0
+    assert all(p.grad is None for p in model.safety_encoder.parameters())
+    assert all(b.safety_gate.grad is None for b in model.blocks)
+    assert all(p.grad is None for b in model.blocks
+               for p in b.safety_cross_attn.parameters())
+    # AdaLN-Zero: on step 1 only the output head moves (every gate is still 0),
+    # which is exactly what the dual arm shows too -- the map-only path IS trained
+    assert float(model.head.weight.grad.abs().sum()) > 0
+
+def test_u_target_safety_removes_the_gt_anchor(pipeline, cfg, fresh_models):
+    """``u_target='safety'``: the map-only branch is distilled, never regressed on GT."""
+    from copy import deepcopy
+    from gp_diffuser.factory import build_codec, build_schedule
+    model, encoder = fresh_models
+    run_cfg = deepcopy(cfg)
+    run_cfg.setdefault("training", {})["u_target"] = "safety"
+    run_cfg["training"]["align_space"] = "raw"
+    trainer = DualBranchTrainer(run_cfg, model, encoder, pipeline["map_encoder"],
+                                build_codec(run_cfg), build_schedule(run_cfg),
+                                device="cpu", scene_scale=pipeline["transform"].scale)
+    assert trainer.u_target == "safety" and trainer.align_space == "raw"
+    dataset = SyntheticTrajectoryDataset(run_cfg, "test")
+    cache = _cache(pipeline, run_cfg, dataset)
+    items = [dataset[i] for i in range(len(dataset))]
+    stats = trainer.train_step(items, cache, np.arange(len(items)))
+    assert stats["loss_u"] == 0.0, "no GT term may act on the map-only branch"
+    # step 1 cannot show a gap yet: the DiT output head is zero-initialised, so
+    # both branches emit exactly the same (zero) polygon until it starts moving
+    stats = trainer.train_step(items, cache, np.arange(len(items)))
+    assert stats["loss_align"] > 0.0
+    assert stats["loss_u"] == 0.0
+    assert float(model.head.weight.grad.abs().sum()) > 0
+
+
+def test_align_space_raw_ignores_the_endpoint_modulation(pipeline, cfg, fresh_models):
+    """The alignment must be computed on the FREE polygons, not the fixed-up ones."""
+    from gp_diffuser.factory import build_codec, build_schedule
+    model, encoder = fresh_models
+    trainer = DualBranchTrainer(cfg, model, encoder, pipeline["map_encoder"],
+                                build_codec(cfg), build_schedule(cfg), device="cpu",
+                                scene_scale=pipeline["transform"].scale)
+    assert trainer.align_space == "raw"
+    seen = []
+    original = type(trainer.boundary).forward
+
+    def spy(self, controls, cond, heading=None, heading_valid=None):
+        out = original(self, controls, cond, heading, heading_valid)
+        seen.append((controls.detach().clone(), out.detach().clone()))
+        return out
+
+    type(trainer.boundary).forward = spy
+    dataset = SyntheticTrajectoryDataset(cfg, "test")
+    cache = _cache(pipeline, cfg, dataset)
+    items = [dataset[i] for i in range(len(dataset))]
+    try:
+        stats = trainer.train_step(items, cache, np.arange(len(items)))
+    finally:
+        type(trainer.boundary).forward = original
+    raw_u, fixed_u = seen[0]
+    # the two polygons must really differ, otherwise this test proves nothing
+    assert not torch.allclose(raw_u, fixed_u)
+    from gp_diffuser.training.losses import control_x0_loss
+    expected = float(control_x0_loss(seen[0][0], seen[1][0]).mean())
+    assert abs(stats["loss_align"] - expected) < 1e-5
+
+
+def test_privileged_corridor_keeps_the_map_only_branch_safety_free(pipeline, cfg,
+                                                                  fresh_models):
+    """A corridor term on the map-only branch is a LABEL: its forward stays map-only."""
+    from copy import deepcopy
+    from gp_diffuser.factory import build_codec, build_schedule
+    model, encoder = fresh_models
+    run_cfg = deepcopy(cfg)
+    run_cfg.setdefault("loss_weights", {})["lambda_safe_u"] = 0.15
+    trainer = DualBranchTrainer(run_cfg, model, encoder, pipeline["map_encoder"],
+                                build_codec(run_cfg), build_schedule(run_cfg),
+                                device="cpu", scene_scale=pipeline["transform"].scale)
+    dataset = SyntheticTrajectoryDataset(run_cfg, "test")
+    cache = _cache(pipeline, run_cfg, dataset)
+    items = [dataset[i] for i in range(len(dataset))]
+
+    seen = []
+    original = type(model).forward
+
+    def spy(self, *args, **kwargs):
+        seen.append(kwargs.get("safety_memory"))
+        return original(self, *args, **kwargs)
+
+    type(model).forward = spy
+    try:
+        stats = trainer.train_step(items, cache, np.arange(len(items)))
+    finally:
+        type(model).forward = original
+    assert seen[0] is None, "the map-only forward must not receive ellipse tokens"
+    assert seen[1] is not None, "the safety forward still does"
+    assert stats["loss_safe_u"] >= 0.0

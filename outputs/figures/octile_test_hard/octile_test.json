@@ -1,0 +1,62 @@
+{
+  "map": "London_1_256_part_0_0.map",
+  "map_shape": [
+    512,
+    512
+  ],
+  "map_blocked": 0.271331787109375,
+  "window": [
+    0,
+    96
+  ],
+  "window_blocked": 0.111328125,
+  "resolution_m": 0.25,
+  "chord_m": 30.06035595264966,
+  "samples": [
+    {
+      "sample": 0,
+      "valid": false,
+      "collision_rate": 0.0819704553714289,
+      "min_clearance_m": -0.9652052572347316,
+      "length_m": 33.72449770462233,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 1.6972418999939691
+    },
+    {
+      "sample": 1,
+      "valid": false,
+      "collision_rate": 0.08158173454442819,
+      "min_clearance_m": -0.980985502388195,
+      "length_m": 33.78333663490647,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 0.8751860999909695
+    },
+    {
+      "sample": 2,
+      "valid": false,
+      "collision_rate": 0.08199645270896003,
+      "min_clearance_m": -0.9679922519150694,
+      "length_m": 33.73956038126677,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 1.0126445000059903
+    },
+    {
+      "sample": 3,
+      "valid": false,
+      "collision_rate": 0.081451027727331,
+      "min_clearance_m": -0.9816358419664639,
+      "length_m": 33.78512834745877,
+      "endpoint_error_m": 0.0,
+      "alm_steps": 0,
+      "corridor_cells": 0,
+      "seconds": 1.594795899989549
+    }
+  ],
+  "figure": "outputs\\figures\\octile_test_hard\\octile_predictions.png"
+}

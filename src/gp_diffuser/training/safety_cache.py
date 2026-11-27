@@ -71,6 +71,9 @@ def fingerprint(cfg: dict, split: str, size: int, checkpoint: Optional[str] = No
     payload = {
         "split": split,
         "size": int(size),
+        # identity of the code that produced the geometry: the cached ellipses and
+        # corridors are only valid for the generator that built them
+        "geometry_generator": "vendor/field_guided_search+vendor/ellipsenet/PSENet;r_scene=res_m",
         "dataset": {k: cfg.get("dataset", {}).get(k) for k in
                     ("res_m", "grid", "extent_m", "robot_radius_cells",
                      "min_geodesic_m", "path_points")},

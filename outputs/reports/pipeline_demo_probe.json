@@ -1,0 +1,90 @@
+{
+  "checkpoint": "outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt",
+  "split": "val",
+  "steps": 50,
+  "seed": 0,
+  "scenes": [
+    {
+      "index": 0,
+      "stage1_map_only": {
+        "collision_rate": 0.017563939057413182,
+        "min_clearance_m": -0.07026430488931276,
+        "length_m": 25.02582399152299,
+        "chamfer_to_gt_m": 1.353765845298767,
+        "num_forwards": 50
+      },
+      "stage2_search": {
+        "status": "success",
+        "fallback": null,
+        "sources": 61,
+        "expanded": 109,
+        "valid": true,
+        "endpoint_projected": false,
+        "path_verified": true,
+        "path_points": 128
+      },
+      "stage3_safety_features": {
+        "ellipse_tokens": 64,
+        "ellipse_center_span_m": 17.4987226659639,
+        "ellipse_axis_m_mean": [
+          4.33751230314374,
+          2.341749961487949
+        ],
+        "ellipse_axis_m_min_max": [
+          0.6148247122764587,
+          5.1004319190979
+        ],
+        "local_convex_cells": 14,
+        "corridor_spans": [
+          [
+            49,
+            62
+          ]
+        ],
+        "constraint_pieces": 92,
+        "constraint_inequalities": 504,
+        "constraint_pieces_local": 92,
+        "constraint_inequalities_local": 216,
+        "timing_s": {
+          "search_s": 0.009,
+          "ellipse_s": 0.09,
+          "corridor_s": 0.078
+        },
+        "search_stats": {
+          "status": "success",
+          "fallback": null,
+          "sources": 61,
+          "expanded": 109,
+          "valid": true,
+          "endpoint_projected": false,
+          "path_verified": true
+        }
+      },
+      "stage4_safety_injected": {
+        "collision_rate": 0.01049765186785226,
+        "min_clearance_m": -0.03323959722751369,
+        "length_m": 24.525720081870528,
+        "chamfer_to_gt_m": 0.9448877573013306,
+        "safety_generated_once": true
+      },
+      "stage5_alm": {
+        "collision_rate": 0.01547580143287694,
+        "min_clearance_m": -0.055164337158203125,
+        "length_m": 27.09532946034473,
+        "chamfer_to_gt_m": 1.0779433250427246,
+        "alm_steps": 25,
+        "accepted": 25,
+        "rejected": 0,
+        "violation_before_mean": 0.06122379302978516,
+        "violation_after_mean": 0.00870458483695984,
+        "feasible_rate_mean": 0.9955158901214599,
+        "correction_m_mean": 0.4008523440361023,
+        "correction_m_max": 3.8588249683380127
+      },
+      "final": {
+        "guide_to_final_m": 0.318349689245224
+      },
+      "figure": "outputs\\figures\\pipeline_demo\\staged_val000.png"
+    }
+  ]
+}

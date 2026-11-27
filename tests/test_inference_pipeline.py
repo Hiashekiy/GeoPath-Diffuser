@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from gp_diffuser.diffusion import sampler_conditional_dit as sampler_mod
-from gp_diffuser.map_encoder.resunet import ResUNet
+from gp_diffuser.vendor.ellipsenet.models.resunet import ResUNet
 
 
 def _batch(item):
@@ -16,17 +16,19 @@ def _batch(item):
 def test_map_encoded_once_per_run(pipeline, sample, monkeypatch):
     item, _ = sample
     calls = {"occ": 0, "sdf": 0}
-    original = ResUNet.forward_with_features
+    original = ResUNet.forward
 
     def counting(self, x):
         calls["occ" if self is pipeline["net"].occ_unet else "sdf"] += 1
         return original(self, x)
 
-    monkeypatch.setattr(ResUNet, "forward_with_features", counting)
+    monkeypatch.setattr(ResUNet, "forward", counting)
     occ, sdf, sg, hd, hv = _batch(item)
     pipeline["sampler"].sample(occ, sdf, sg, heading=hd, heading_valid=hv,
                                steps=6, seed=0)
-    assert calls == {"occ": 1, "sdf": 1}
+    # one pass for the DiT map condition, one inside the vendored PSENet: their
+    # forward owns its encoders, so the features cannot be injected
+    assert calls == {"occ": 2, "sdf": 2}
 
 
 def test_safety_geometry_is_generated_once(pipeline, sample):
