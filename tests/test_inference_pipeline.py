@@ -390,11 +390,17 @@ def test_default_is_8_reverse_steps(pipeline, sample: object):
     assert out["frames"]["num_forwards"] == 8
 
 
-def test_safety_geometry_still_lands_mid_schedule_at_8_steps(pipeline, sample: object):
-    """With 8 steps the one-shot geometry is generated at forward 4, not at 0/7."""
+def test_safety_geometry_is_built_at_the_configured_forward(pipeline, sample: object):
+    """``sampling.geometry_forward`` places the one-shot geometry (0-based).
+
+    The shipped default builds it at the SECOND executed step, so CPCG guides
+    every step after the first one instead of only the second half.
+    """
     item, _ = sample
     occ, sdf, sg, hd, hv = _batch(item)
     out = pipeline["sampler"].sample(occ, sdf, sg, heading=hd, heading_valid=hv,
                                      seed=0)
-    assert out["frames"]["k_safety"] == 4
+    assert out["frames"]["k_safety"] == int(
+        pipeline["sampler"].cfg["sampling"]["geometry_forward"])
+    assert out["frames"]["k_safety"] == 1
     assert int(out["guidance_steps"]) >= 1

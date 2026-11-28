@@ -82,6 +82,8 @@ class DualBranchTrainer:
             weight_decay=float(train_cfg.get("weight_decay", 1e-4)))
         self.grad_clip = float(train_cfg.get("grad_clip", 1.0))
         self.history: List[Dict] = []
+        # steps skipped because the loss / a gradient was not finite
+        self.skipped_steps: int = 0
 
     # ------------------------------------------------------------------ helpers
     def trainable_parameter_count(self) -> int:
@@ -236,16 +238,37 @@ class DualBranchTrainer:
         self.map_encoder.eval()
         loss, stats = self._compute(batch, cache, index)
 
-        # ---- exactly ONE backward + ONE update ----------------------------
+        # ---- non-finite guard (measured: one loss spike at step 215650 turned
+        # the run into NaN at step 215700 and it kept "training" for 9 epochs,
+        # overwriting the checkpoint with NaN weights.  Grad clipping cannot fix
+        # NaN - it propagates it - so the step is skipped instead.)
+        if not torch.isfinite(loss):
+            self.skipped_steps += 1
+            stats["skipped"] = 1.0
+            self.history.append(stats)
+            return stats
+
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        if not all(torch.isfinite(p.grad).all()
+                   for p in self.trainable_parameters if p.grad is not None):
+            self.optimizer.zero_grad(set_to_none=True)
+            self.skipped_steps += 1
+            stats["skipped"] = 1.0
+            self.history.append(stats)
+            return stats
         if self.grad_clip > 0:
             # the clip must cover the DiT AND the new map encoder (spec §5.4)
             torch.nn.utils.clip_grad_norm_(self.trainable_parameters, self.grad_clip)
         self.optimizer.step()
 
+        stats["skipped"] = 0.0
         self.history.append(stats)
         return stats
+
+    def weights_are_finite(self) -> bool:
+        """``True`` when every trainable parameter is finite (checkpoint gate)."""
+        return all(bool(torch.isfinite(p).all()) for p in self.trainable_parameters)
 
     # --------------------------------------------------------------- eval step
     @torch.no_grad()
@@ -261,6 +284,12 @@ class DualBranchTrainer:
     # --------------------------------------------------------------------- ckpt
     def save_checkpoint(self, path: str, epoch: int, steps: int,
                         with_optimizer: bool = False) -> str:
+        if not self.weights_are_finite():
+            # never write a NaN checkpoint over a good one (measured: a diverged
+            # run replaced last.pt with 261 non-finite tensors)
+            print("[guard] REFUSING to save %s: non-finite weights at epoch %d"
+                  % (path, int(epoch)), flush=True)
+            return ""
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         payload = {"architecture_version": self.model.architecture_version,
                    "model": self.model.state_dict(),
@@ -314,7 +343,12 @@ class DualBranchTrainer:
                 batch = [train_items[int(i)] for i in index]
                 stats = self.train_step(batch, cache, index)
                 steps += 1
-                if steps % max(1, int(log_every)) == 0:
+                if stats.get("skipped"):
+                    print("epoch %d step %4d | [guard] non-finite loss/gradient - "
+                          "step skipped (%d so far) %.1fs"
+                          % (epoch + 1, steps, self.skipped_steps,
+                             time.perf_counter() - start), flush=True)
+                elif steps % max(1, int(log_every)) == 0:
                     print("epoch %d step %4d | loss %.5f (u %.4f c %.4f align %.4f "
                           "bnd %.4f sm %.4f crv %.4f safe %.4f/max %.3f su %.4f) "
                           "gate %.3f %.1fs"
@@ -340,6 +374,8 @@ class DualBranchTrainer:
             "steps": steps,
             "epochs": int(epochs),
             "seconds": time.perf_counter() - start,
+            "skipped_steps": int(self.skipped_steps),
+            "weights_finite": bool(self.weights_are_finite()),
             "last": self.history[-1] if self.history else None,
             "trainable_parameters": self.trainable_parameter_count(),
         }

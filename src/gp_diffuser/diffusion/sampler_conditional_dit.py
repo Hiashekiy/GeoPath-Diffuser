@@ -315,7 +315,16 @@ class ConditionalDiTSampler:
         T = int(self.schedule.num_timesteps)
         times = pick_times(T, steps) or list(range(T))
         reverse = list(reversed(times))
-        k_safety = int(round(mid_fraction * (len(reverse) - 1)))
+        # where the ONE-SHOT safety geometry is built (0-based forward index).
+        # ``geometry_forward`` wins over the fraction when present: the search /
+        # ellipse / corridor chain needs a clean prediction that already has a
+        # global shape, but the caller may want it as early as possible.
+        geometry_forward = sampling_cfg.get("geometry_forward")
+        if geometry_forward is None:
+            k_safety = int(round(mid_fraction * (len(reverse) - 1)))
+        else:
+            k_safety = int(geometry_forward)
+        k_safety = max(0, min(k_safety, len(reverse) - 1))
 
         sqrt_ab = self.schedule.sqrt_alphas_cumprod.to(device).float()
         sqrt_1ma = self.schedule.sqrt_one_minus_alphas_cumprod.to(device).float()

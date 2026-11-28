@@ -162,7 +162,11 @@ alm:                                 # LEGACY (not used by the sampler any more)
 
 sampling:
   safety_generation: "once_at_intermediate_step"
-  mid_forward_fraction: 0.5          # fraction of executed forwards before it
+  # 0-based forward index at which the one-shot safety geometry (search ->
+  # ellipses -> corridor -> pack) is built and CPCG starts.  ``null`` falls back
+  # to ``mid_forward_fraction`` of the executed steps.
+  geometry_forward: 1
+  mid_forward_fraction: 0.5          # used only when geometry_forward is null
   reuse_safety_geometry: true
   # Number of EXECUTED reverse steps.  ``pick_times`` spreads them uniformly over
   # the trained noise table, so 8 = 8 denoising forwards (DDIM subsampling); the

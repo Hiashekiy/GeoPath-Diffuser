@@ -28,7 +28,10 @@ diffusion:
 
 sampling:
   steps: 12                          # full trained table at inference
-  mid_forward_fraction: 0.5          # geometry generated at forward 6 of 12
+  # build the one-shot safety geometry at the SECOND executed step (0-based 1)
+  # instead of the mid-schedule default, so CPCG guides 11 of 12 steps.
+  geometry_forward: 1
+  mid_forward_fraction: 0.5          # ignored while geometry_forward is set
 
 clean_guidance:
   enabled: true

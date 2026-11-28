@@ -262,3 +262,72 @@ def test_privileged_corridor_keeps_the_map_only_branch_safety_free(pipeline, cfg
     assert seen[0] is None, "the map-only forward must not receive ellipse tokens"
     assert seen[1] is not None, "the safety forward still does"
     assert stats["loss_safe_u"] >= 0.0
+
+
+# --------------------------------------------------------------------------- #
+# non-finite guard (a real divergence: one loss spike at step 215650 turned the
+# run into NaN from step 215700 on, and ``last.pt`` was overwritten with 261
+# non-finite tensors - gradient clipping cannot repair a NaN)
+# --------------------------------------------------------------------------- #
+def test_non_finite_loss_skips_the_optimizer_step(pipeline, cfg):
+    dataset = SyntheticTrajectoryDataset(cfg, "test")
+    cache = _cache(pipeline, cfg, dataset)
+    trainer = _trainer(pipeline, cfg)
+    items = [dataset[i] for i in range(len(dataset))]
+
+    before = [p.detach().clone() for p in trainer.trainable_parameters]
+    original = trainer._compute
+
+    def poisoned(*args, **kwargs):
+        loss, stats = original(*args, **kwargs)
+        return loss * float("nan"), stats
+
+    trainer._compute = poisoned
+    try:
+        stats = trainer.train_step(items, cache, np.arange(len(items)))
+    finally:
+        trainer._compute = original
+
+    assert stats["skipped"] == 1.0
+    assert trainer.skipped_steps == 1
+    for old, new in zip(before, trainer.trainable_parameters):
+        assert torch.equal(old, new), "a non-finite loss must not update the weights"
+    assert trainer.weights_are_finite()
+
+
+def test_non_finite_gradient_skips_the_optimizer_step(pipeline, cfg):
+    dataset = SyntheticTrajectoryDataset(cfg, "test")
+    cache = _cache(pipeline, cfg, dataset)
+    trainer = _trainer(pipeline, cfg)
+    items = [dataset[i] for i in range(len(dataset))]
+
+    before = [p.detach().clone() for p in trainer.trainable_parameters]
+    original_step = trainer.optimizer.step
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("optimizer.step must not be reached with a NaN gradient")
+
+    handle = trainer.model.head.weight.register_hook(
+        lambda g: torch.full_like(g, float("nan")))
+    trainer.optimizer.step = must_not_run
+    try:
+        stats = trainer.train_step(items, cache, np.arange(len(items)))
+    finally:
+        handle.remove()
+        trainer.optimizer.step = original_step
+
+    assert stats["skipped"] == 1.0
+    for old, new in zip(before, trainer.trainable_parameters):
+        assert torch.equal(old, new)
+    assert trainer.weights_are_finite()
+
+
+def test_checkpoint_refuses_non_finite_weights(pipeline, cfg, tmp_path):
+    dataset = SyntheticTrajectoryDataset(cfg, "test")
+    trainer = _trainer(pipeline, cfg)
+    path = str(tmp_path / "should_not_exist.pt")
+    trainer.model.head.weight.data[0, 0] = float("nan")
+    assert trainer.weights_are_finite() is False
+    assert trainer.save_checkpoint(path, epoch=1, steps=1) == ""
+    import os
+    assert not os.path.exists(path), "a NaN checkpoint must never be written"

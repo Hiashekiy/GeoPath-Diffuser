@@ -137,12 +137,13 @@ s.t. A[p,f]·E[p,r]·Q <= b[p,f]            只展开 piece_mask & face_mask 的
 ## 3. Phase A：测试结果
 
 ```
-python -m pytest tests -q          # 153 collected
-152 passed, 1 skipped
+python -m pytest tests -q          # 156 collected
+155 passed, 1 skipped
 ```
 
 | 文件 | 用例 | 说明 |
 |---|---|---|
+| `tests/test_dual_branch_training.py` | 13 | 双支路共享 `q_t/t`、单次反向、无安全臂隔离；**非有限守卫**（NaN loss 跳过、NaN 梯度跳过、NaN 权重拒绝落盘） |
 | `tests/test_clean_guidance.py` | 26 | 有限差分核对（atol 1e-4 / rtol 1e-3）、下降方向、已满足则零引导、掩码不产生梯度、空 pack（None / 0 piece / 全 False）、batch 独立性、C=32/64、端点与朝向保持、DDIM 代数一致性；**代价无 count 归一化**（`J = 0.5Σv²`、重复约束使 J 恰好翻倍、跨违反数跳变仍单调、并断言旧式 `J/count` 在该扫描上非单调）；**Trust Region = 步长**（接受后 `|Δ|_max == max_delta_m`）；**backtracking**（窄走廊下 α<1、无法下降则拒绝且位级不变、随机多边形上被接受行严格下降） |
 | `tests/test_qp_projection.py` | 10 | box 走廊可行、端点精确、切向约束、全局控制点（非独立 Bezier）、空 pack 不认证、不可行明确报告、C=32/64、行装配与 `pack` 半空间逐一对应、padding 面不入 QP |
 | `tests/test_inference_pipeline.py` | 22 | 搜索/椭圆各一次、pack 与 safety memory 对象同一、CPCG 不增加前向、`q0_guided` 确实进入 DDIM、QP 恰好一次、512 点验证针对 QP 后曲线、三模式差异、别名、搜索失败标记、未认证不覆盖轨迹、默认 8 步且几何落在第 4 步 |
@@ -304,7 +305,7 @@ checkpoint：`outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt`（T=1000，
 5. **`num_controls` 与 checkpoint 不匹配不会报错**（实测遇到的坑）：DiT 的控制点数不进入任何权重形状，
    用 C=32 的配置加载 C=64 的权重会"成功"但在错误的表示上推理。跑评测时请用训练时的 config
    （本报告一律 `configs/c64_longpath.yaml`）。
-6. 测试：**152 passed, 1 skipped**（沙箱放开后原先 `tmp_path` 的两个 error 也消失了，现在是全绿）。
+6. 测试：**155 passed, 1 skipped**（含新增的 3 个非有限守卫用例；沙箱放开后原先 `tmp_path` 的两个 error 也消失了，现在是全绿）。
 
 ---
 
@@ -335,6 +336,11 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
     --indices 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 `
     --checkpoint outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt --device cuda `
     --groups C,D --set clean_guidance.max_delta_m=1.0 --out outputs/reports/cpcg_newguid_md10.json
+
+# F) 逐去噪步可视化（含每步碰撞量），见 §11.3
+& $py -u scripts\visualize_cpcg_steps.py --config configs/c64_t12.yaml `
+    --checkpoint outputs/checkpoints/cpcg_t12_100ep/t12_ep070.pt `
+    --split test --scan 40 --mode cpcg --device cuda
 ```
 
 产物：`outputs/reports/{inference_report,cpcg_paired,cpcg_newguidance_8steps,cpcg_newguid_md01,
@@ -358,3 +364,64 @@ cpcg_newguid_md05,cpcg_newguid_md10}.{json,md}`、
   `max_delta_m` 0.125/0.25/0.5 三组完全相同（Trust Region 未生效）。
 * 图表：`outputs/figures/{map_only,safety_only,cpcg}_000_1000.png`、
   `outputs/reports/cpcg_paired.json`（已被 8 步版本覆盖，历史数字见本报告表格）。
+
+---
+
+## 11. T=12 重训（`configs/c64_t12.yaml`）的结局与逐步骤可视化
+
+### 11.1 训练实况（结论：**取 epoch 70 作为交付权重**）
+
+| 阶段 | 结果 |
+|---|---|
+| 12,178 条全量 train split、C=64、双支路、batch 4 | 3,045 步/epoch，0.14–0.18 s/步 |
+| epoch 1 → 70 | loss 0.970 → **0.0088**，`sm 0.026` 主导，无异常 |
+| epoch 71 step 215,650 | loss 单步尖峰 0.14（正常 0.009），**下一步开始 NaN** |
+| epoch 71–79 | 无守卫 → 带着 NaN 又"训"了 9 个 epoch，`last.pt` 被写成 **261 个非有限张量** |
+| **本次修复** | `train_step` 增加非有限守卫（loss / 梯度）、`save_checkpoint` 拒绝写非有限权重；3 个单测覆盖 |
+| epoch 70 → 86（从 `t12_ep070.pt` 续训） | 守卫生效：0 个 NaN 权重落盘；但 epoch 74 起坏批次数单调上升 1 → 623 → 1,410 → 2,046 → 2,926/3,045（**96 % 被跳过**），且未跳过的步 loss 从 0.0088 涨到 0.40–0.54 → **模型已坏**，任务在下令后人工中止 |
+
+推断根因：**后期学习率过高**（loss 1e-2 的尖锐极小值 + `lr 2e-4` 的 AdamW），一次坏更新就把模型踢出极小值区；
+守卫只止损不治病。若要继续，应从 `t12_ep070.pt` 以 **lr 5e-5** 续训。
+
+**可用权重**：`outputs/checkpoints/cpcg_t12_100ep/t12_ep070.pt`（权重全有限，loss 0.0088）；
+`t12_ep080/090/last.pt` 训练中后期已被污染（权重有限但质量崩坏，勿用）。
+
+### 11.2 `t12_ep070` 的推理质量（20 场景、12 步、整改后的 CPCG）
+
+| 组 | 碰撞率 | 碰撞自由 | 每步违反 (m) | 最终违反 (m) | QP solved | 有证书 |
+|---|---|---|---|---|---|---|
+| C safety+CPCG | 0.0435 | 14/20 | 1.245 | 0.746 | — | 0 |
+| D + 末端 QP | **0.0085** | **19/20** | 1.245 | **0.197** | 18/20 | 18/20 |
+| 对照 D（T=1000 `d2_ep100`，8 步） | 0.0134 | 19/20 | 0.531 | 0.056 | 17/20 | 17/20 |
+
+即 T=12 的 70-epoch 权重**碰撞率更低**（0.85 % vs 1.34 %），但网络输出离走廊更远
+（每步违反 1.245 vs 0.531 m），所以末端 QP 的修正量更大（1.54 m vs 0.58 m）；
+纯 CPCG 组也更依赖 QP（4.35 % → 0.85 %）。
+
+### 11.3 逐去噪步可视化（新脚本）
+
+```powershell
+& $py -u scripts\visualize_cpcg_steps.py --config configs/c64_t12.yaml `
+    --checkpoint outputs/checkpoints/cpcg_t12_100ep/t12_ep070.pt `
+    --split test --scan 40 --mode cpcg --device cuda
+```
+
+对**每一个执行步**输出一格子图，含：地图、GT、搜索路径、64 个椭圆、走廊凸区域（只画曲线附近的单元）、
+该步的 `x0_pred` 与 `x0_guided`，标题标注该步的**碰撞百分比 / 碰撞段数 / 走廊违反量（m）**，
+角落标注 CPCG 的 `J 前→后 / Δmax / α`；最后一格是末端 QP 之后的最终轨迹
+（同时画 QP 前的曲线），标注 `QP 状态 / 证书 / 修正量 / 最小间隙`。
+另出一张 `..._collision.png` 画"每步碰撞量"曲线，并写 `..._metrics.json`。
+
+首个碰撞样本（test #1，`cpcg_ep070_s001`）的读数：
+
+| 阶段 | 每步碰撞 | 走廊违反 |
+|---|---|---|
+| 第 1–6 步（map-only，几何尚未生成） | **40.3 %**（2 段） | 6.50 → 6.40 m |
+| 第 7 步（几何生效，CPCG 首次介入） | 39.6 % → guided 19.3 % | 6.41 m |
+| 第 8–12 步（CPCG 逐步压低） | 19.3 → 17.3 %（1 段） | 3.91 → 3.72 m |
+| 最终（末端 QP） | **16.96 %**，`primal infeasible` → 未修正、无证书 | 最小间隙 −1.77 m |
+
+结论：这一样本的走廊**完全不覆盖**该轨迹（违反 6.4 m），因此末端 QP 不可行、如实拒绝认证，
+CPCG 只能把碰撞从 40 % 压到 17 %。这与 §8 第 2 条（走廊覆盖）是同一个待修问题，
+也是"CPCG 有效但受几何质量限制"的最直观证据。
+图：`outputs/figures/cpcg_steps/cpcg_ep070_s001.png`、`..._collision.png`、`..._metrics.json`。
