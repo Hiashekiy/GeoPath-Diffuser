@@ -8,10 +8,10 @@
 
 | group | scenes | collision | collision-free | step viol mean/max (m) | final viol (m) | CPCG steps | QP solved | certified | QP corr (m) | s |
 |---|---|---|---|---|---|---|---|---|---|---|
-| cpcg_full | 20 | 0.0134 | 19 | 0.532 / 0.749 | 0.056 | 4.0 | 17 | 17 | 0.578 | 0.25 |
-| cpcg_no_projection | 20 | 0.0192 | 17 | 0.532 / 0.749 | 0.232 | 4.0 | 0 | 0 | - | 0.23 |
-| map_only | 20 | 0.0609 | 13 | 0.000 / 0.000 | 0.000 | 0.0 | 0 | 0 | - | 0.13 |
-| safety_only | 20 | 0.0245 | 15 | 0.600 / 0.794 | 0.368 | 0.0 | 0 | 0 | - | 0.22 |
+| cpcg_full | 20 | 0.0134 | 19 | 0.531 / 0.749 | 0.056 | 4.0 | 17 | 17 | 0.578 | 0.49 |
+| cpcg_no_projection | 20 | 0.0192 | 17 | 0.531 / 0.749 | 0.232 | 4.0 | 0 | 0 | - | 0.46 |
+| map_only | 20 | 0.0609 | 13 | 0.000 / 0.000 | 0.000 | 0.0 | 0 | 0 | - | 0.21 |
+| safety_only | 20 | 0.0245 | 15 | 0.600 / 0.794 | 0.368 | 0.0 | 0 | 0 | - | 0.38 |
 
 ## Per scene
 
@@ -24,8 +24,8 @@
 | 0 | shared pack across B/C/D | True | | | | | | | |
 | 1 | map_only | 0.0000 | 0.304 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
 | 1 | safety_only | 0.0305 | -0.130 | 0.671 / 0.973 | 0.958 | 0 | not_run | 0.000 | False |
-| 1 | cpcg_no_projection | 0.0000 | 0.276 | 0.465 / 0.534 | 0.520 | 4 | not_run | 0.000 | False |
-| 1 | cpcg_full | 0.0000 | 0.276 | 0.465 / 0.534 | 0.520 | 4 | primal infeasible | 0.000 | False |
+| 1 | cpcg_no_projection | 0.0000 | 0.276 | 0.466 / 0.534 | 0.520 | 4 | not_run | 0.000 | False |
+| 1 | cpcg_full | 0.0000 | 0.276 | 0.466 / 0.534 | 0.520 | 4 | primal infeasible | 0.000 | False |
 | 1 | shared pack across B/C/D | True | | | | | | | |
 | 2 | map_only | 0.0000 | 1.625 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
 | 2 | safety_only | 0.0000 | 1.625 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
@@ -74,8 +74,8 @@
 | 10 | shared pack across B/C/D | True | | | | | | | |
 | 11 | map_only | 0.1015 | -0.139 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
 | 11 | safety_only | 0.0000 | 1.209 | 0.561 / 0.920 | 0.000 | 0 | not_run | 0.000 | False |
-| 11 | cpcg_no_projection | 0.0000 | 1.209 | 0.520 / 0.905 | 0.000 | 4 | not_run | 0.000 | False |
-| 11 | cpcg_full | 0.0000 | 1.209 | 0.520 / 0.905 | 0.000 | 4 | solved | 0.000 | True |
+| 11 | cpcg_no_projection | 0.0000 | 1.209 | 0.501 / 0.905 | 0.000 | 4 | not_run | 0.000 | False |
+| 11 | cpcg_full | 0.0000 | 1.209 | 0.501 / 0.905 | 0.000 | 4 | solved | 0.000 | True |
 | 11 | shared pack across B/C/D | True | | | | | | | |
 | 12 | map_only | 0.0000 | 0.408 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
 | 12 | safety_only | 0.0000 | 0.615 | 0.067 / 0.129 | 0.000 | 0 | not_run | 0.000 | False |
@@ -104,8 +104,8 @@
 | 16 | shared pack across B/C/D | True | | | | | | | |
 | 17 | map_only | 0.0225 | -0.161 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
 | 17 | safety_only | 0.0000 | 0.486 | 0.574 / 0.856 | 0.154 | 0 | not_run | 0.000 | False |
-| 17 | cpcg_no_projection | 0.0000 | 0.686 | 0.466 / 0.856 | 0.000 | 4 | not_run | 0.000 | False |
-| 17 | cpcg_full | 0.0000 | 0.686 | 0.466 / 0.856 | 0.000 | 4 | solved | 0.000 | True |
+| 17 | cpcg_no_projection | 0.0000 | 0.727 | 0.466 / 0.856 | 0.000 | 4 | not_run | 0.000 | False |
+| 17 | cpcg_full | 0.0000 | 0.727 | 0.466 / 0.856 | 0.000 | 4 | solved | 0.000 | True |
 | 17 | shared pack across B/C/D | True | | | | | | | |
 | 18 | map_only | 0.0000 | 6.204 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |
 | 18 | safety_only | 0.0000 | 6.204 | 0.000 / 0.000 | 0.000 | 0 | not_run | 0.000 | False |

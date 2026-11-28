@@ -97,7 +97,9 @@ src/gp_diffuser/
                                  safety_mode ∈ {map_only, safety_only, cpcg}
                                  （旧别名 no_alm → safety_only、full → cpcg）；
                                  record_curves 记录每步 x0_pred / x0_guided，末尾 x0_projected
-  diffusion/clean_guidance.py     CPCG：masked squared-hinge 安全代价 + 解析梯度 + Trust Region
+  diffusion/clean_guidance.py     CPCG：`J = 0.5·Σrelu(g+margin)²`（**不除违反个数**）+ 解析梯度
+                                 → BoundaryDecoder 重投影 → 归一化到 `max_delta_m`（Trust Region 即步长）
+                                 → backtracking（只接受 J 严格下降的步，否则原样返回）
                                  （不对 DiT 反传，不需要 autograd）
   diffusion/bspline_alm.py        历史/对照模块（ALM），活动推理链路已不再调用
   safety/qp_projection.py         末端凸 QP（OSQP）：pack → 稀疏 A x ≤ b + 端点/朝向行，逐样本求解

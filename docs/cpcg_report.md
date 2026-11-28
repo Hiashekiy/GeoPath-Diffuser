@@ -14,27 +14,29 @@
 推理期 ALM 已被 **CPCG（干净预测空间的解析走廊梯度）+ 一次末端 OSQP 凸投影** 取代，
 采样器不再 import/call ALM；解析梯度与有限差分一致（差 3.3e-5），走廊几何在配置迁移后**逐位不变**。
 
-**8 步 + 当前 checkpoint（`d2_ep100`，C=64，真实 test split）实测效果（20 个场景配对）**：
+**2026-11-28 评审整改后**（详见 §2.1）：安全代价不再除以违反约束个数（`count` 归一化会带来
+不连续 + 梯度被稀释），Trust Region 改为"步长"本身并对每个试探重新过 BoundaryDecoder 评估真实代价，
+新增 backtracking 接受机制（只接受 `J` 严格下降的步）。整改后 `max_delta_m` 成为**单调有效的旋钮**。
+
+**8 步 + 当前 checkpoint（`d2_ep100`，C=64，真实 test split，20 个场景配对，配置见 §6.0）**：
 
 | 组 | 碰撞率 | 碰撞自由场景 | 每步违反 均值/最大 (m) | 最终违反 (m) | QP solved | 有证书 | QP 修正 (m) | 单样本耗时 |
 |---|---|---|---|---|---|---|---|---|
-| A map_only | 0.0609 | 13/20 | 0.000 / 0.000 | 0.000 | — | 0 | — | 0.13 s |
-| B safety_only | 0.0245 | 15/20 | 0.600 / 0.794 | 0.368 | — | 0 | — | 0.23 s |
-| C safety+CPCG（无 QP） | 0.0244 | 15/20 | 0.599 / 0.793 | 0.365 | — | 0 | — | 0.22 s |
-| **D safety+CPCG+QP** | **0.0149** | **18/20** | 0.599 / 0.793 | **0.078** | **17/20** | **17/20** | 0.763 | 0.26 s |
+| A map_only | 0.0609 | 13/20 | 0.000 / 0.000 | 0.000 | — | 0 | — | 0.21 s |
+| B safety_only | 0.0245 | 15/20 | 0.600 / 0.794 | 0.368 | — | 0 | — | 0.38 s |
+| C safety+CPCG（无 QP） | 0.0192 | 17/20 | 0.531 / 0.749 | 0.232 | — | 0 | 0.46 s |
+| **D safety+CPCG+QP** | **0.0134** | **19/20** | 0.531 / 0.749 | **0.056** | **17/20** | **17/20** | 0.578 | 0.49 s |
 
-即：**末端 QP 是主力**（碰撞率 2.45 % → 1.49 %，碰撞自由 15 → 18/20，最终走廊违反 0.368 → 0.078 m，
-17/20 拿到证书）；**CPCG 本身在 8 步下贡献很小**（0.368 → 0.365 m，−0.8 %），
-把 `step_size` 放大到 10 后可到 −19 %（0.296 m，碰撞自由 17/20）。原因见 §7：方案 §2.2 的
-`count` 归一化把每步位移压到毫米级，Trust Region（0.25 m）从未生效。
+结论：
+* **CPCG 现在自己有实质贡献**：走廊违反 0.368 → **0.232 m（−37 %）**、碰撞 2.45 % → **1.92 %（−22 %）**、
+  碰撞自由 15 → **17/20**；`max_delta_m` 从 0.1 扫到 1.0 时违反单调降到 0.155 m（−58 %，§7）。
+* **末端 QP 仍是"零碰撞"的收尾**：把 1.92 % 压到 **1.34 %**、最终违反 0.232 → **0.056 m**，17/20 拿证书。
+* 代价：曲率均值 +15 %（md 0.5）/ +44 %（md 1.0），见 §7 的"质量代价"列。
+* 3/20 场景末端 QP 不可行（走廊不覆盖起终点），采样器如实报 `primal infeasible`、不给证书、
+  不放宽端点/朝向条件（方案 §5.4）。
 
-
-**实测效果（1000 步、真实 checkpoint `d2_ep100`）**：
-在唯一"CPCG 有事可做"的场景（test #4）上，CPCG 使后续干净预测的走廊违反量**单调下降**
-（0.1888 → 0.1847 m，`step_size` 扫到 0.5 时为 0.1682 m），末端 QP 的修正需求量**同步下降 7.8 %**
-（0.5285 → 0.4872 m）；最终 QP 在该场景求解成功并给出证书（违反量 0，修正 0.5239 m）。
-场景 #1 上末端 QP **不可行**（走廊不覆盖起终点），采样器如实报告 `primal infeasible` 并**不**给出证书、
-也**不**放宽端点/朝向条件——不把原始预测冒充安全轨迹。
+**历史**（整改前的 count 归一化版本，保留以便对比）：C 组 0.365 m（−0.8 %）、D 组 0.078 m / 18/20 自由；
+1000 步满表运行的存档见 §10。
 
 ---
 
@@ -42,7 +44,7 @@
 
 | 文件 | 状态 | 内容 |
 |---|---|---|
-| `src/gp_diffuser/diffusion/clean_guidance.py` | 新增 | masked squared-hinge 安全代价、解析梯度、Trust Region 引导步 |
+| `src/gp_diffuser/diffusion/clean_guidance.py` | 新增 | `J = 0.5·Σrelu(g+margin)²`（不除违反个数）+ 解析梯度 → 重投影 → 归一化到 `max_delta_m` → backtracking 接受（见 §2.1） |
 | `src/gp_diffuser/safety/qp_projection.py` | 新增 | pack → 稀疏 `A x ≤ b` + 端点/朝向行，逐样本 OSQP 凸 QP，证书与失败诊断 |
 | `src/gp_diffuser/diffusion/sampler_conditional_dit.py` | 修改 | 删除 ALM 分支（`lam`/dual/accept-reject），接入 CPCG 与末端 QP，模式改名，trace/统计字段 |
 | `configs/default.yaml` | 修改 | 新增 `clean_guidance` / `final_projection`；走廊几何参数归位 `corridor`；`alm` 标记为历史 |
@@ -62,7 +64,7 @@
 
 ---
 
-## 2. 实现的数学（与方案逐条对应）
+## 2. 实现的数学
 
 ```text
 beta[p,r] = E[p,r] Q                                 精确三次 Bezier 提取（pack 已提供）
@@ -70,22 +72,44 @@ g[p,r,f] = A[p,f]·beta[p,r] - b[p,f]                  g<=0 安全
 raw       = g + margin_scene                          margin_scene 默认 0（走廊自带 safety_margin）
 
 v         = relu(raw) * valid                          valid = piece_mask & face_mask
-violated  = valid & (raw > 0)
-count     = sum(violated).clamp_min(1)                只统计"当前违反"的有效标量
-J         = 0.5 * sum(v²) / count                     masked squared hinge
-dJ/dQ[k,d]= sum_{p,r,f} v * A[p,f,d] * E[p,r,k] / count   解析梯度，无 autograd
+J         = 0.5 * sum(v²)                             **不做 count 归一化**（§2.1）
+dJ/dQ[k,d]= sum_{p,r,f} v * A[p,f,d] * E[p,r,k]       解析梯度，无 autograd
 ```
 
-引导步（`clean_prediction_guidance`）：
+引导步（`clean_prediction_guidance`，direction → trust region → backtracking）：
 
 ```text
 grad[:, 0] = grad[:, -1] = 0                          端点不是自由变量
 q0_tmp     = q0 - step_size * grad
-q0_bound   = BoundaryDecoder(q0_tmp, S, G, heading)   端点/朝向条件在步后仍然成立
-delta_eff  = q0_bound - q0
-scale      = min(1, max_delta_scene / max_i|delta_eff_i|)
-q0_guided  = q0 + where(has_violation, scale*delta_eff, 0)   无违反 → 原样返回
+delta_eff  = BoundaryDecoder(q0_tmp, S, G, heading) - q0    端点/朝向条件在步后仍然成立
+d_TR       = delta_eff * (max_delta_scene / max_i|delta_eff_i|)   ← Trust Region 就是步长
+for a in (1, 0.5, 0.25, 0.125, 0.0625):
+    Q_try  = BoundaryDecoder(q0 + a * d_TR, S, G, heading)     每次试探都重新过 decoder
+    if J(Q_try) < J(q0):  accept(Q_try, alpha=a); break        严格下降才接受
+否则：reject，q0 原样返回（统计里计为 rejected）
 ```
+
+### 2.1 评审整改（2026-11-28）
+
+针对静态审查提出的四个问题逐条处理，**未改动** Diffusion 网络、训练损失、Bezier 约束与 DDIM：
+
+| 审查项 | 处理 | 证据 |
+|---|---|---|
+| ① `count` 归一化稀释梯度（梯度/数百 → 毫米级位移，Trust Region 从不生效） | 删除分母；`J = 0.5·Σv²`，梯度为原始求和 | `test_cost_is_the_plain_sum_of_violations`、`test_cost_grows_with_the_number_of_equal_violations`（重复一份约束 → J 恰好 ×2） |
+| ② 代价在违反个数变化时不连续（N:1→2 使 J 减半） | 同上；`safe_loss_before/after` 现在可直接用作判据 | `test_cost_is_continuous_when_a_new_constraint_starts_violating`：同一扫描下新代价单调 ↑；并断言旧式 `J/count` 在该扫描上**确实非单调**（N:48→82 时掉 41 %） |
+| ③ 缺修正接受机制（改坏也照样进 DDIM） | backtracking 线搜索 + 严格下降判据；不接受则原样返回 | `test_a_step_that_cannot_improve_is_rejected`、`test_acceptance_never_increases_the_cost`（随机多边形 3 seed，被接受行严格下降、被拒行位级不变） |
+| ④ Trust Region 只是"上限" | 归一化为步长 + 逐试探重投影后评估真实代价 | `test_trust_region_is_the_actual_step_length`（接受后 `|Δ|_max == max_delta_m`）、`test_backtracking_shortens_an_overshooting_step`（窄走廊下 α<1 被选中） |
+
+行为变化（实测，10 个 test 场景 × 8 步）：
+
+* 每步 `J_after/J_before = 0.698`（平均降低 30 %），步长 `|Δ|_max = 0.500 m` 正好等于 `max_delta_m`；
+* 40 个被引导的步里有 16 个（40 %）存在违反并全部被接受，`alpha = 1.0`、`trials = 1`
+  —— 在这批场景上全步长就能下降，线搜索当前是"安全网"而非限流器（窄走廊单测里它会真的触发）；
+* 拒绝率 0 %（拒绝只在无法下降时发生，见单测）。
+
+配置一致性（审查第 4 点）：`configs/default.yaml` 现在是 `step_size: 1.0` / `max_delta_m: 0.5` /
+`backtrack_factors: [1, .5, .25, .125, .0625]` / `sampling.steps: 8`，本报告所有表格都用这套值；
+整改前的 `step_size: 10.0` 系列数字集中在 §7 的历史段与 §10。
 
 接入 DDIM（**调度器数学一字未改**，只替换 `q0_used`）：
 
@@ -113,22 +137,17 @@ s.t. A[p,f]·E[p,r]·Q <= b[p,f]            只展开 piece_mask & face_mask 的
 ## 3. Phase A：测试结果
 
 ```
-python -m pytest tests -q          # 142 collected
-140 passed, 1 skipped, 2 errors    # 两个 error = pytest 的 tmp_path fixture 在本机沙箱下无法创建临时目录
+python -m pytest tests -q          # 153 collected
+152 passed, 1 skipped
 ```
 
 | 文件 | 用例 | 说明 |
 |---|---|---|
-| `tests/test_clean_guidance.py` | 16 | 有限差分核对（atol 1e-4 / rtol 1e-3）、下降方向、已满足则零引导、掩码不产生梯度、空 pack（None / 0 piece / 全 False）、batch 独立性、C=32/64、端点与朝向保持、Trust Region 上限、DDIM 代数一致性 |
+| `tests/test_clean_guidance.py` | 26 | 有限差分核对（atol 1e-4 / rtol 1e-3）、下降方向、已满足则零引导、掩码不产生梯度、空 pack（None / 0 piece / 全 False）、batch 独立性、C=32/64、端点与朝向保持、DDIM 代数一致性；**代价无 count 归一化**（`J = 0.5Σv²`、重复约束使 J 恰好翻倍、跨违反数跳变仍单调、并断言旧式 `J/count` 在该扫描上非单调）；**Trust Region = 步长**（接受后 `|Δ|_max == max_delta_m`）；**backtracking**（窄走廊下 α<1、无法下降则拒绝且位级不变、随机多边形上被接受行严格下降） |
 | `tests/test_qp_projection.py` | 10 | box 走廊可行、端点精确、切向约束、全局控制点（非独立 Bezier）、空 pack 不认证、不可行明确报告、C=32/64、行装配与 `pack` 半空间逐一对应、padding 面不入 QP |
-| `tests/test_inference_pipeline.py` | 22 | 搜索/椭圆各一次、pack 与 safety memory 对象同一、CPCG 不增加前向、`q0_guided` 确实进入 DDIM、QP 恰好一次、512 点验证针对 QP 后曲线、三模式差异、别名、搜索失败标记、未认证不覆盖轨迹、**默认 8 步且几何落在第 4 步** |
+| `tests/test_inference_pipeline.py` | 22 | 搜索/椭圆各一次、pack 与 safety memory 对象同一、CPCG 不增加前向、`q0_guided` 确实进入 DDIM、QP 恰好一次、512 点验证针对 QP 后曲线、三模式差异、别名、搜索失败标记、未认证不覆盖轨迹、默认 8 步且几何落在第 4 步 |
 
 有限差分实测（box 走廊，C=32，`k=10,d=0`）：解析 `0.0590868` vs 有限差分 `0.0591204`，差 `3.3e-5`。
-
-**两个 error 与本轮改动无关**（`test_checkpoint_version_gate`、`test_cache_fingerprint_rejects_stale`）：
-它们使用 pytest 的 `tmp_path` fixture；在当前的 DSH 沙箱下 `tmp_path` 的目录创建/扫描被拒绝
-（用一个只写 `tmp_path` 的空测试单独复现，同样失败）。命令行上给 `--basetemp` 也会在 pytest 会话结束时
-于 `cleanup_dead_symlinks` 报同样的权限错误。
 
 ---
 
@@ -165,15 +184,15 @@ arch 版本校验通过，C=64。）
 
 | mode | 碰撞率 | 成功 | 朝向误差 | 走廊违反（m） | CPCG 步数 | QP 状态 | 证书 | QP 修正（m） | 总耗时/样本 |
 |---|---|---|---|---|---|---|---|---|---|
-| map_only | 0.0000 | 1.00 | 0.0° | 0.0000 | 0 | — | 否 | 0.0000 | 0.15 s |
-| safety_only | 0.0019 | 0.88 | 0.0° | 0.1591 | 0 | — | 否 | 0.0000 | 0.24 s |
-| cpcg | 0.0018 | 0.88 | 0.0° | **0.1075** | 4 | solved | **是** | 0.0691 | 0.25 s |
+| map_only | 0.0000 | 1.00 | 0.0° | 0.0000 | 0 | — | 否 | 0.0000 | 0.24 s |
+| safety_only | 0.0019 | 0.88 | 0.0° | 0.1591 | 0 | — | 否 | 0.0000 | 0.43 s |
+| cpcg | 0.0000 | 1.00 | 0.0° | **0.0669** | 4 | solved | **是** | 0.0199 | 0.48 s |
 
 （“成功”= 该样本 `valid`；8 个场景里有 1 个在两种安全模式下都不 valid，原因与走廊/端点覆盖有关，见 §6.1。）
 
-分项耗时（cpcg，8 步合计 0.25 s）：地图编码 `0.012 s` / 4 步 map-only + 4 步 safety-conditioned ≈ `0.20 s` /
-搜索 `0.03 s` / 椭圆 `0.05 s` / 走廊 `0.11 s` / **CPCG 4 步合计 ≈ `0.02 s`** / QP `0.013 s` / 512 点验证 `0.017 s`。
-对比：同样链路跑满 1000 步是 **27 s/样本**，即 8 步快 **≈100 倍**（见 §10 存档）。
+分项耗时（cpcg，8 步合计 0.48 s）：地图编码 `0.012 s` / 4 步 map-only + 4 步 safety-conditioned ≈ `0.40 s` /
+搜索 `0.03 s` / 椭圆 `0.05 s` / 走廊 `0.11 s` / **CPCG 4 步（含 backtracking）≈ `0.03 s`** / QP `0.014 s` /
+512 点验证 `0.017 s`。对比：同样链路跑满 1000 步是 **27 s/样本**，即 8 步快 **≈60 倍**（见 §10 存档）。
 
 图：`outputs/figures/{map_only,safety_only,cpcg}_000_08.png`
 （(c) 面板同时给出 `x0_pred → x0_guided → x0_projected` 与 pack 的 Bezier 分段多边形）。
@@ -181,6 +200,20 @@ arch 版本校验通过，C=64。）
 ---
 
 ## 6. Phase C：同噪声明配对 A/B/C/D（8 步 · 20 个场景）
+
+### 6.0 报告的配置口径（审查第 4 点）
+
+本节与 §0/§7 的全部数字都用**同一套配置**，即 `configs/default.yaml` 当前值：
+
+```yaml
+sampling.steps: 8
+clean_guidance: {enabled: true, step_size: 1.0, max_delta_m: 0.5,
+                 backtrack_factors: [1.0, 0.5, 0.25, 0.125, 0.0625], margin_scene: 0.0}
+final_projection: {enabled: true, solver: osqp, feasibility_tol_scene: 1.0e-4}
+```
+
+checkpoint：`outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt`（T=1000，C=64）。
+命令行：
 
 ```powershell
 & $py -u scripts\run_cpcg_paired.py --config configs/c64_longpath.yaml --dataset real --split test `
@@ -193,24 +226,23 @@ arch 版本校验通过，C=64。）
 
 | 组 | 碰撞率 | 碰撞自由 | 最小间隙(m) 均值 | 每步违反 均值/最大(m) | 最终违反(m) | QP solved | 有证书 | QP 修正(m) | 耗时 |
 |---|---|---|---|---|---|---|---|---|---|
-| A map_only | 0.0609 | 13/20 | 0.858 | 0.000 / 0.000 | 0.000 | — | 0 | — | 0.13 s |
-| B safety_only | 0.0245 | 15/20 | 0.751 | 0.600 / 0.794 | 0.368 | — | 0 | — | 0.23 s |
-| C safety+CPCG | 0.0244 | 15/20 | 0.751 | 0.599 / 0.793 | 0.365 | — | 0 | — | 0.22 s |
-| D safety+CPCG+QP | **0.0149** | **18/20** | **0.813** | 0.599 / 0.793 | **0.078** | **17/20** | **17/20** | 0.763 | 0.26 s |
+| A map_only | 0.0609 | 13/20 | 0.858 | 0.000 / 0.000 | 0.000 | — | 0 | — | 0.21 s |
+| B safety_only | 0.0245 | 15/20 | 0.751 | 0.600 / 0.794 | 0.368 | — | 0 | — | 0.38 s |
+| C safety+CPCG | **0.0192** | **17/20** | 0.769 | 0.531 / 0.749 | **0.232** | — | 0 | — | 0.46 s |
+| D safety+CPCG+QP | **0.0134** | **19/20** | **0.813** | 0.531 / 0.749 | **0.056** | **17/20** | **17/20** | 0.578 | 0.49 s |
 
 ### 6.1 关键判据（对照方案 §10）
 
-* **末端 QP 是这轮的主力**：碰撞率 2.45 % → 1.49 %，碰撞自由 15 → 18/20，最终走廊违反 0.368 → 0.078 m，
-  17/20 场景求解成功且拿到证书（512 点密集碰撞验证同时通过）。
-* **CPCG 自身影响很小但方向正确**：每步最大违反 0.600 → 0.599 m、最终 0.368 → 0.365 m（−0.8 %）。
-  放大 `step_size` 可放大到 −19 %（§7）。**这是"梯度太弱"，不是"接线错误"**：
-  解析梯度与有限差分一致，且效果随 `step_size` 单调。
+* **CPCG 单独有效**：走廊违反 0.368 → **0.232 m（−37 %）**、碰撞 2.45 % → **1.92 %（−22 %）**、
+  碰撞自由 15 → **17/20**，每步最大违反 0.600 → 0.531 m。整改前同一配置（旧 count 归一化 +
+  `step_size 10 / md 0.5`）只能做到 −0.8 %，差别就来自 §2.1 的归一化与步长语义。
+* **末端 QP 完成"零碰撞"收尾**：1.92 % → **1.34 %**、最终违反 0.232 → **0.056 m**，17/20 求解成功并拿到证书
+  （512 点密集碰撞验证同时通过）。
 * **3/20 场景 QP 不可行**（`primal infeasible`）：诊断字段 `failure_reason = endpoints_outside_corridor`
   —— 走廊的首/末凸单元没有覆盖 S/G，硬端点条件与走廊冲突。按方案 §5.4 如实报告、**不放宽**约束、
-  **不**把未投影曲线当成安全轨迹（`corridor_certified = false`）。这 3 个场景里 CPCG/QP 都改不了碰撞，
-  下一轮要先修走廊覆盖。
-* **安全条件 ≠ 更"走廊安全"**：A 组（map_only）碰撞反而最低（0.06 vs 0.025），因为网络学到的曲线会内切
-  走廊收口；这正是需要末端 QP 的几何原因，也是 A→B 走廊违反从 0 升到 0.368 m 的来源。
+  **不**把未投影曲线当成安全轨迹（`corridor_certified = false`）。
+* **安全条件 ≠ 更"走廊安全"**：A 组（map_only）碰撞反而最低（0.061 vs 0.025），因为网络学到的曲线会内切
+  走廊收口；这正是需要梯度引导 + 末端 QP 的几何原因。
 
 ### 6.2 每步违反曲线
 
@@ -220,57 +252,59 @@ arch 版本校验通过，C=64。）
 
 ---
 
-## 7. Phase D：`step_size` 扫描（8 步 · 20 个场景 · C 与 D 组）
+## 7. Phase D：`max_delta_m`（Trust Region = 步长）扫描（8 步 · 20 个场景 · C 与 D 组）
+
+整改后 `step_size` 只是"原始梯度步的比例"，归一化会让它退化，真正的旋钮是 `max_delta_m`：
 
 ```powershell
-& $py -u scripts\run_cpcg_paired.py ... --groups C,D --set clean_guidance.step_size=10.0
+& $py -u scripts\run_cpcg_paired.py ... --groups C,D --set clean_guidance.max_delta_m=1.0
 ```
 
-| step_size | C 最终违反 (m) | C 每步违反 均值/最大 (m) | C 碰撞率 | C 碰撞自由 | D QP 修正 (m) | D 碰撞率 |
-|---|---|---|---|---|---|---|
-| **0.1（默认）** | 0.365 | 0.599 / 0.793 | 0.0244 | 15/20 | 0.763 | 0.0149 |
-| 2.0 | 0.320 | 0.575 / 0.779 | 0.0225 | 16/20 | 0.669 | 0.0140 |
-| 10.0 | **0.296** | **0.563 / 0.771** | **0.0209** | **17/20** | 0.708 | **0.0134** |
+| `max_delta_m` (m) | C 最终违反 (m) | C 每步违反 均值/最大 (m) | C 碰撞率 | C 碰撞自由 | 曲率均值 / 最大 | 最小间隙 (m) | D QP 修正 (m) | D 碰撞率 |
+|---|---|---|---|---|---|---|---|---|
+| 0（无引导，B 组） | 0.368 | 0.600 / 0.794 | 0.0245 | 15/20 | 0.0745 / 1.25 | 1.208 | — | — |
+| 0.10 | 0.337 | 0.585 / 0.785 | 0.0228 | 16/20 | 0.0749 / 1.27 | 1.230 | 0.074 | 0.0142 |
+| 0.25 | 0.296 | 0.563 / 0.771 | 0.0209 | 17/20 | 0.0773 / 1.29 | 1.261 | 0.067 | 0.0134 |
+| **0.50（默认）** | **0.232** | **0.531 / 0.749** | **0.0192** | **17/20** | 0.0856 / 1.37 | 1.304 | **0.056** | **0.0134** |
+| 1.00 | 0.155 | 0.485 / 0.748 | 0.0168 | 18/20 | 0.1076 / 1.97 | 1.354 | 0.040 | 0.0134 |
 
-（1000 步下的同款扫描见 §10 存档，结论一致：单调变好、幅度有限。）
+结论：
 
-结论（如实记录，未改方案公式）：
-
-1. **效果随 `step_size` 单调**：0.1 → 10（100 倍）使 C 组最终违反 −19 %、碰撞自由 +2/20。
-2. **Trust Region 从未生效**：`max_delta_m = 0.125 / 0.25 / 0.5` 结果完全相同（1000 步扫描）；
-   本数据实测单步位移只有毫米级。根因是方案 §2.2 规定的 `count` 归一化（只按当前违反面数平均，
-   违反面常有数百个），把梯度压到 ~1e-3。
-3. 若想让 Trust Region 真正起作用，可考虑 `step_size ∈ [2, 10]` 或按 `sqrt(count)` 归一化——
-   后者是对方案**有意偏离**，需要你确认；本轮默认值仍是方案给的 `0.1`。
+1. **`max_delta_m` 现在是单调有效的步长旋钮**（整改前 0.125/0.25/0.5 三组结果**完全相同**，
+   因为梯度被 `count` 除到毫米级，上限永不触发）。0.1 → 1.0 m 使走廊违反 −54 %、碰撞 −26 %。
+2. **代价是曲率**：md 0.5 曲率均值 +15 %、md 1.0 为 +44 %（最大曲率 1.25 → 1.97），
+   长度仅 +0.8 %，最小间隙 +8 %。默认取 0.5 m 是"违反/碰撞收益 vs 平滑度"的折中点，
+   1.0 m 作为安全优先选项记录在此表中。
+3. `step_size` 保持 1.0：它只决定"原始梯度步有多大"，归一化后不影响被接受步的长度
+   （单测 `test_trust_region_is_the_actual_step_length` 断言 `|Δ|_max == max_delta_m`）。
 4. `margin_scene` 保持 0（走廊构建已含 `corridor.region.safety_margin = 0.02`），未叠加第二层裕度。
 
+### 7.1 整改前的扫描（历史，count 归一化 + step_size 语义）
 
-结论（如实记录，未擅自改公式）：
-
-1. **效果随 `step_size` 单调变好但没有饱和点被触及**：0.1 → 10（100 倍）只带来 −19 % 的走廊违反改进。
-2. **Trust Region 从未生效**：`max_delta_m = 0.125 / 0.25 / 0.5` 三组结果**完全相同**，
-   实测单步最大位移只有毫米级。原因是方案 §2.2 规定的 `count` 归一化（只按当前违反面数平均）
-   在本数据上把梯度压到 ~1e-3 量级：`delta ≈ step_size * v / count ≈ 0.1 * 0.01/500`。
-   若下一轮想真正用满 Trust Region，可考虑 `step_size ∈ [2, 10]` 或改为按 `sqrt(count)` 归一化——
-   后者是对方案的**有意偏离**，需要先确认，本轮默认值仍是方案给的 `0.1`。
-3. `margin_scene` 保持 0（走廊构建已含 `corridor.region.safety_margin = 0.02`），未叠加第二层裕度。
+为便于对照，记录整改前的同一组实验：`step_size` 0.1 / 2.0 / 10.0 → C 最终违反 0.365 / 0.320 / 0.296 m，
+`max_delta_m` 0.125 / 0.25 / 0.5 → 结果完全相同。这组数据就是"归一化缺陷"的直接证据，
+也是本轮整改的依据。1000 步满表下的同类扫描见 §10。
 
 ---
 
 ## 8. 已知限制 / 下一轮建议
 
-1. **checkpoint 未收敛**：`d2_ep100` 在 README §5.1 已记录"推理碰撞 9–38 %"，本报告的绝对数值只用于
-   验证 CPCG 管线与相对趋势，不构成性能结论。
+1. **checkpoint 未收敛且正在换 T**：`d2_ep100`（T=1000）在 README §5.1 已记录"推理碰撞 9–38 %"，
+   本报告的绝对数值只用于验证 CPCG 管线与相对趋势；`configs/c64_t12.yaml`（T=12、100 epoch、全量
+   real train split）的重训完成后，同一套脚本会再出一版数字（§11）。
 2. **走廊不覆盖端点的样本会导致末端 QP 不可行**（20 个场景里 3 个）。下一轮应检查
    `build_safety_corridor` 的首/末单元是否包含 S/G，或把 QP 的端点行改为"包络式"（先判覆盖，再决定是否投影）
    ——方案禁止的是**悄悄**丢约束，显式判定并报告是允许的，但需要先确认口径。
-3. **CPCG 的梯度被归一化稀释**：8 步只有 4 个被引导的步，每步位移毫米级，因此它的贡献远小于末端 QP。
-   若要让 CPCG 成为主力，需要（a）提高 `step_size`/改归一化，或（b）增加执行步数（8 → 20/50）。
+3. **CPCG 的剩余上限**：8 步里只有 4 个被引导的步，`max_delta_m` 再往上加会开始牺牲平滑度
+   （§7：md 1.0 → 曲率 +44 %）。若要让引导承担更多工作，应增加执行步数（8 → 12/20）或改进方向
+   （例如把 `margin_scene` 调成正裕度），而不是单纯放大步长。
 4. **验收口径**：本轮的"安全证书"= 末端 QP 在非空 pack 上 solved、残差 ≤ `feasibility_tol_scene`、
    且 512 点密集碰撞验证通过（`corridor_certified`）。它只对 pack 覆盖的曲线区间成立，不是对整条曲线的
    地图级保证；地图级结论仍以 dense collision validation 为准（与方案 §12 一致）。
-5. 2 个 `tmp_path` 用例在本机沙箱下无法运行（见 §3），不影响本轮任何结论；README/HANDOFF 里的
-   测试数量以本报告为准（**140 passed, 1 skipped**，8 步改动后重跑）。
+5. **`num_controls` 与 checkpoint 不匹配不会报错**（实测遇到的坑）：DiT 的控制点数不进入任何权重形状，
+   用 C=32 的配置加载 C=64 的权重会"成功"但在错误的表示上推理。跑评测时请用训练时的 config
+   （本报告一律 `configs/c64_longpath.yaml`）。
+6. 测试：**152 passed, 1 skipped**（沙箱放开后原先 `tmp_path` 的两个 error 也消失了，现在是全绿）。
 
 ---
 
@@ -296,16 +330,17 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
     --indices 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 `
     --checkpoint outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt --device cuda
 
-# E) 参数扫描（Phase D）
+# E) 参数扫描（Phase D，Trust Region = 步长）
 & $py -u scripts\run_cpcg_paired.py --config configs/c64_longpath.yaml --dataset real --split test `
     --indices 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 `
     --checkpoint outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt --device cuda `
-    --groups C,D --set clean_guidance.step_size=10.0 --out outputs/reports/cpcg_8steps_ss100.json
+    --groups C,D --set clean_guidance.max_delta_m=1.0 --out outputs/reports/cpcg_newguid_md10.json
 ```
 
-产物：`outputs/reports/{inference_report,cpcg_8steps_20,cpcg_8steps_ss200,cpcg_8steps_ss100}.{json,md}`、
+产物：`outputs/reports/{inference_report,cpcg_paired,cpcg_newguidance_8steps,cpcg_newguid_md01,
+cpcg_newguid_md05,cpcg_newguid_md10}.{json,md}`、
 `outputs/figures/{map_only,safety_only,cpcg}_000_08.png`、`outputs/figures/cpcg_paired/scene*.png`、
-`outputs/logs/{cpcg_8steps,cpcg_8_20,corridor_equiv}.log`。
+`outputs/logs/{cpcg_8steps,new_guid_8,new_guid_md*,corridor_equiv}.log`。
 
 ---
 

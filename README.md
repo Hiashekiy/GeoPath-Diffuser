@@ -172,7 +172,7 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 | `guidance` | `lam 0.01 / weight linear / policy B3_linear_fusion / alpha 0.25 / path_points 128` | 上游实测最优组合；λ 随地图尺度调整 |
 | `safety_condition` | **仅 64 椭圆** `[cx,cy,a,b,cos2θ,sin2θ]`；`path_tokens: false` | 搜索路径仍用于椭圆中心线/碰撞投影/凸区域，但不进入 Diffusion |
 | `corridor` | `mode trajsafe`、`min_overlap_ratio 0.10`、`bridge`、`region.*`（含 `safety_margin 0.02`）、`constraint_margin_scene 0.0`、`local.*`、`training_scope full` | 几何参数已从 `alm` 解耦（`scripts/verify_corridor_equivalence.py` 证明逐位不变） |
-| `clean_guidance` | `enabled true`、`method analytic_squared_hinge`、`step_size 0.1`、`max_delta_m 0.25`、`margin_scene 0.0` | CPCG：对干净预测的解析梯度步 + Trust Region |
+| `clean_guidance` | `enabled true`、`method analytic_squared_hinge_unormalised`、`step_size 1.0`、`max_delta_m 0.5`、`backtrack_factors [1,.5,.25,.125,.0625]`、`margin_scene 0.0` | CPCG：`J = 0.5·Σrelu(g+margin)²`（**不除违反个数**）+ 解析梯度 → BoundaryDecoder 重投影 → 归一化到 `max_delta_m`（Trust Region 就是步长）→ backtracking 只接受 `J` 严格下降的步 |
 | `final_projection` | `enabled true`、`solver osqp`、`eps 1e-5`、`max_iter 10000`、`polish true`、`feasibility_tol_scene 1e-4` | 采样结束后一次末端凸 QP |
 | `alm` | `enabled false`（历史/对照，不在活动链路） | 只为 `tests/test_alm.py` 保留 |
 | `sampling` | **`steps 8`**（默认执行 8 个反向步）、`mid_forward_fraction 0.5`、`dense_verify_points 512` | 8 步 = 在训练好的 1000 点噪声表上均匀取 8 个时刻（DDIM 子采样），无需重训；`steps >= train_diffusion_steps` 才是满表 |
