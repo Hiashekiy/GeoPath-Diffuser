@@ -34,7 +34,7 @@ from .safety_corridor import build_safety_corridor
 
 __all__ = ["collision_mask", "collision_intervals", "build_region_table",
            "build_local_constraint_pack", "box_cell_faces", "pad_region_tables",
-           "pack_from_tables"]
+           "pack_from_tables", "sample_pack_from_tables"]
 
 
 # --------------------------------------------------------------------------- #
@@ -281,6 +281,30 @@ def pack_from_tables(codec, tables: List[Dict], margin: float = 0.0,
             dtype=torch.float32,
             device=device))
     return merge_packs(packs, codec.num_controls, device=device)
+
+
+def sample_pack_from_tables(codec, tables: List[Optional[Dict]],
+                            reference_controls,
+                            constraint_points: int = 256,
+                            arc_length_lookup_points: int = 1024,
+                            margin: float = 0.0, include_box: bool = True,
+                            device=None):
+    """Region tables -> ONE frozen :class:`BSplineSampleConstraintPack`.
+
+    This is the ``legacy_local`` entry point of the inference-time constraint
+    expression (uniform-arc-length B-spline samples, one convex cell per sample).
+    ``tables`` has one entry per batch row (``None`` = nothing to constrain) and
+    ``reference_controls`` is the clean control polygon the geometry was built
+    from.  The old :func:`pack_from_tables` is kept untouched for the training
+    loss and the historical ALM path.
+    """
+    from .bspline_sample_constraints import build_sampled_constraint_pack_from_tables
+
+    return build_sampled_constraint_pack_from_tables(
+        codec, tables, reference_controls,
+        constraint_points=int(constraint_points),
+        arc_length_lookup_points=int(arc_length_lookup_points),
+        margin=float(margin), include_box=bool(include_box), device=device)
 
 
 def build_local_constraint_pack(codec, occupancy_scene: torch.Tensor,

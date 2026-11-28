@@ -1,45 +1,51 @@
-"""Clean-Prediction Constraint Guidance (CPCG).
+"""Clean-Prediction Constraint Guidance (CPCG) on uniform-arc-length samples.
 
 The constraint cost is defined on the CLEAN B-spline controls the network just
-predicted, never on the noisy state ``q_t``:
+predicted, never on the noisy state ``q_t``, and it is evaluated on ``M`` real
+curve samples of the frozen
+:class:`~gp_diffuser.safety.bspline_sample_constraints.BSplineSampleConstraintPack`::
 
-    beta[p,r]   = E[p,r] Q                        exact cubic Bezier controls
-    g[p,r,f]    = A[p,f] beta[p,r] - b[p,f]       half-space value (g <= 0 is safe)
-    J(Q)        = 0.5 * sum M[p,r,f] * max(0, g + margin)^2
+    P_l          = N_l Q                          sample points of the curve
+    g[l,f]       = a_{j(l),f} . P_l - b_{j(l),f}  half-space value (<= 0 is safe)
+    J(Q)         = 1/(2M) sum_{l,f} m[l,f] relu(g + delta)^2
 
-**No violated-count normalisation.**  Dividing by ``N_viol(Q)`` makes the cost
-discontinuous whenever a constraint crosses zero (one new violation halves the
-whole cost even if its own value is ~0), and it shrinks the gradient by the
-number of violated scalars - which on a real corridor is several hundred, i.e.
-millimetre-sized control steps.  The un-normalised sum is continuous, has the
-same minimiser (the corridor), and its gradient has the natural scale of the
-violation itself.
+Sample ``l`` is constrained ONLY by the single convex cell ``j(l)`` it was
+assigned to when the safety geometry was built.  One sample point never carries
+all regions, and the assignment never changes with ``Q``: it is frozen by the
+reference arc-length progress ``s_l`` and the frozen cell anchors.
 
-Because every ``E`` / ``A`` / ``b`` is a frozen constant, ``dJ/dQ`` is analytic:
+Because ``N_l``, ``a_{j(l)}``, ``b_{j(l)}`` are constants, the gradient is
+analytic and exact (no autograd, no backward pass through the DiT)::
 
-    d g[p,r,f]/dQ[k,d] = A[p,f,d] E[p,r,k]
-    dJ/dQ = sum_{p,r,f} relu(g+margin) * M * A[p,f,:] * E[p,r,:]
+    d g[l,f] / dQ[k,d] = a_{j(l),f,d} N_l[k]
+    dJ/dQ[k,d]         = 1/M sum_{l,f} relu(g+delta) m a_{j(l),f,d} N_l[k]
 
-so there is no autograd and no backward pass through the DiT.  ``sample()``
-keeps its ``@torch.no_grad()``.
+The denominator is the FIXED sample count ``M``; dividing by the number of
+currently violated rows would make the cost discontinuous at every constraint
+crossing and would shrink the step by the violation count.
 
-Update rule (direction -> trust region -> backtracking):
+Update rule (descent -> boundary projection -> backtracking)::
 
-    1. d       = -dJ/dQ                                  (endpoints zeroed)
-    2. Q_tmp   = BoundaryDecoder(Q + step_size * d)      (endpoints/heading kept)
-    3. d_TR    = (Q_tmp - Q) normalised to |.|_max = max_delta_scene
-    4. for a in (1, 0.5, 0.25, ...):  Q_try = BoundaryDecoder(Q + a * d_TR)
-       accept the first ``a`` with J(Q_try) < J(Q); otherwise REJECT the step
-Q_try is re-projected through the decoder before ``J`` is evaluated, so the
-measured decrease belongs to the polygon that would really be used.
+    d        = -dJ/dQ                                  (endpoints zeroed)
+    for a in (1, 0.5, 0.25, 0.125, 0.0625):
+        Q_try = BoundaryDecoder(Q + a * step_size * d)
+        accept the FIRST trial with J(Q_try) < J(Q)
+    otherwise REJECT and return ``Q`` bit-for-bit
+
+``step_size`` is the real initial gradient step length in scene units per unit of
+gradient; there is NO re-normalisation of the displacement to a fixed
+``max_delta_m`` (that used to amplify tiny gradients into a fixed 0.5 m jump).
+Backtracking is what keeps an overshooting step inside the corridor, so
+``step_size`` must be re-scanned whenever the loss scale changes.
 
 The guided clean prediction enters the sampler through the EXISTING ``q0_used``
-interface: the DDIM update already rebuilds ``eps`` from ``(q_t, q0_used)``, so
-no extra forward, no extra noise and no extra scheduler math are needed.
+interface: the DDIM update rebuilds ``eps`` from ``(q_t, q0_used)``, so no extra
+forward, no extra noise and no extra scheduler math are needed.
 
-Deliberately NOT here: ALM, dual variables, collision penalties on ``q_t``, and
-anything that treats the individual Bezier controls as independent optimisation
-variables.  The only primal variable is the global B-spline control polygon.
+Deliberately NOT here: Bezier extraction / Bezier control points, ALM, dual
+variables, penalties on ``q_t``, and anything that treats sample points as
+independent optimisation variables.  The only primal variable is the global
+B-spline control polygon.
 """
 from __future__ import annotations
 
@@ -47,8 +53,10 @@ from typing import Dict, Optional, Sequence, Tuple
 
 import torch
 
+from ..safety.bspline_sample_constraints import sample_pack_is_empty
+
 __all__ = [
-    "constraint_values",
+    "sample_constraint_values",
     "constraint_loss_and_grad",
     "violation_stats",
     "clean_prediction_guidance",
@@ -60,7 +68,7 @@ DEFAULT_BACKTRACK_FACTORS: Tuple[float, ...] = (1.0, 0.5, 0.25, 0.125, 0.0625)
 
 
 def _empty_stats(q0: torch.Tensor) -> Dict[str, torch.Tensor]:
-    """Values of a pack that constrains nothing (``None``, no piece, no face)."""
+    """Values of a pack that constrains nothing."""
     B = int(q0.shape[0])
     zero = q0.new_zeros(B)
     return {"loss": zero.clone(), "max_violation": zero.clone(),
@@ -69,46 +77,34 @@ def _empty_stats(q0: torch.Tensor) -> Dict[str, torch.Tensor]:
             "has_violation": torch.zeros(B, dtype=torch.bool, device=q0.device)}
 
 
-def _is_empty(pack, q0: torch.Tensor) -> bool:
-    return (pack is None or pack.extraction.shape[1] == 0
-            or pack.piece_A.shape[2] == 0
-            or int(pack.piece_mask.sum()) == 0)
+def sample_constraint_values(q0: torch.Tensor, pack, margin_scene: float = 0.0
+                             ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """``(points [B,M,2], raw [B,M,F], valid [B,M,F])`` of the sampled constraints.
 
-
-def constraint_values(q0: torch.Tensor, pack, margin_scene: float = 0.0
-                      ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``(beta [B,P,4,2], raw [B,P,4,F], valid [B,P,4,F])`` for a clean polygon.
-
-    ``raw = g + margin_scene``: positive means the Bezier control is outside its
-    responsible convex region (plus the extra margin, if any).
+    ``raw = a_{j(l)} . P_l - b_{j(l)} + margin_scene``: positive means that curve
+    sample lies outside its responsible convex cell (plus the extra margin).
     """
-    beta = torch.einsum("bprk,bkd->bprd", pack.extraction, q0)
-    g = (torch.einsum("bpfd,bprd->bprf", pack.piece_A, beta)
-         - pack.piece_b[:, :, None, :])
-    valid = (pack.piece_mask[:, :, None, None]
-             & pack.face_mask[:, :, None, :]).expand_as(g)
-    return beta, g + float(margin_scene), valid
+    points = torch.einsum("bmc,bcd->bmd", pack.basis, q0)
+    g = torch.einsum("bmfd,bmd->bmf", pack.sample_A, points) - pack.sample_b
+    valid = (pack.sample_mask[:, :, None] & pack.face_mask).expand_as(g)
+    return points, g + float(margin_scene), valid
 
 
 def violation_stats(raw: torch.Tensor, valid: torch.Tensor, loss: torch.Tensor,
                     grad_norm: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
     """Per-sample scalars of one constraint evaluation ``[B]`` each."""
     violated = valid & (raw > 0.0)
-    has = violated.any(dim=(1, 2, 3)) if raw.dim() == 4 else \
-        torch.zeros(raw.shape[0], dtype=torch.bool, device=raw.device)
-    stats = {
-        "loss": loss,
-        "max_violation": (torch.relu(raw) * valid).flatten(1).max(dim=1).values
-        if raw.dim() == 4 and raw.shape[1] and raw.shape[3]
-        else torch.zeros(raw.shape[0], dtype=raw.dtype, device=raw.device),
-        "violated_count": violated.sum(dim=(1, 2, 3)).to(raw.dtype)
-        if raw.dim() == 4 else torch.zeros(raw.shape[0], dtype=raw.dtype,
-                                           device=raw.device),
-        "valid_count": valid.sum(dim=(1, 2, 3)).to(raw.dtype)
-        if raw.dim() == 4 else torch.zeros(raw.shape[0], dtype=raw.dtype,
-                                           device=raw.device),
-        "has_violation": has,
-    }
+    with torch.no_grad():
+        max_violation = (torch.relu(raw) * valid).flatten(1).max(dim=1).values \
+            if raw.shape[1] else torch.zeros(raw.shape[0], dtype=raw.dtype,
+                                             device=raw.device)
+        stats = {
+            "loss": loss,
+            "max_violation": max_violation,
+            "violated_count": violated.sum(dim=(1, 2)).to(raw.dtype),
+            "valid_count": valid.sum(dim=(1, 2)).to(raw.dtype),
+            "has_violation": violated.any(dim=(1, 2)),
+        }
     if grad_norm is not None:
         stats["grad_norm"] = grad_norm
     return stats
@@ -116,38 +112,35 @@ def violation_stats(raw: torch.Tensor, valid: torch.Tensor, loss: torch.Tensor,
 
 def constraint_loss_and_grad(q0: torch.Tensor, pack, margin_scene: float = 0.0
                              ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-    """Masked squared hinge of the frozen pack and its analytic gradient.
+    """``(loss [B], grad [B,C,2], stats)`` of the frozen sample pack.
 
-    ``loss_per_sample [B]``, ``grad_q0 [B,C,2]`` and a stats dict.  The sum runs
-    over EVERY valid violated scalar with NO count normalisation: the cost is
-    continuous in ``Q`` (adding one more violation changes ``J`` by that
-    violation's own quadratic term only), and its gradient is not diluted by the
-    hundreds of faces a real corridor carries.
-
-    A sample with no violated constraint gets an exactly zero gradient (and a
-    zero loss), so guidance cannot move it through numerical noise.
+    ``J = 1/(2M) sum relu(g + delta)^2`` with the FIXED sample count ``M``:
+    continuous in ``Q`` and with the natural scale of the violation.  A sample
+    with nothing violated gets an exactly zero gradient, so guidance cannot move
+    it through numerical noise.
     """
-    if _is_empty(pack, q0):
+    if sample_pack_is_empty(pack):
         zeros = torch.zeros_like(q0)
         return q0.new_zeros(int(q0.shape[0])), zeros, _empty_stats(q0)
 
     pack = pack.to(device=q0.device, dtype=q0.dtype)
-    _, raw, valid = constraint_values(q0, pack, margin_scene)
-    violated = valid & (raw > 0.0)
-    v = torch.relu(raw) * valid                     # [B,P,4,F], masked hinge value
-    loss = 0.5 * v.square().sum(dim=(1, 2, 3))
-
-    grad = torch.einsum("bprf,bpfd,bprk->bkd", v, pack.piece_A, pack.extraction)
-    has = violated.any(dim=(1, 2, 3))
-    grad = torch.where(has[:, None, None], grad, torch.zeros_like(grad))
-    stats = violation_stats(raw, valid, loss, grad_norm=grad.norm(dim=(1, 2)))
+    _, raw, valid = sample_constraint_values(q0, pack, margin_scene)
+    v = torch.relu(raw) * valid                       # [B,M,F]
+    M = max(int(pack.basis.shape[1]), 1)
+    loss = 0.5 * v.square().sum(dim=(1, 2)) / float(M)
+    grad = torch.einsum("bmf,bmfd,bmc->bcd", v, pack.sample_A, pack.basis) / float(M)
+    stats = violation_stats(raw, valid, loss.detach(),
+                            grad_norm=grad.detach().norm(dim=(1, 2)))
     return loss, grad, stats
 
 
 def _loss_at(q0: torch.Tensor, pack, margin_scene: float) -> torch.Tensor:
     """``J(Q)`` without its gradient (used by the backtracking line search)."""
-    _, raw, valid = constraint_values(q0, pack, margin_scene)
-    return 0.5 * (torch.relu(raw) * valid).square().sum(dim=(1, 2, 3))
+    if sample_pack_is_empty(pack):
+        return q0.new_zeros(int(q0.shape[0]))
+    _, raw, valid = sample_constraint_values(q0, pack, margin_scene)
+    M = max(int(pack.basis.shape[1]), 1)
+    return 0.5 * (torch.relu(raw) * valid).square().sum(dim=(1, 2)) / float(M)
 
 
 def clean_prediction_guidance(
@@ -157,29 +150,18 @@ def clean_prediction_guidance(
     start_goal: torch.Tensor,
     heading: Optional[torch.Tensor] = None,
     heading_valid: Optional[torch.Tensor] = None,
-    step_size: float = 1.0,
-    max_delta_scene: float = 0.01,
+    step_size: float = 10.0,
     margin_scene: float = 0.0,
     backtrack_factors: Optional[Sequence[float]] = None,
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    """One accepted descent step on the clean polygon.
+    """One accepted descent step on the clean control polygon.
 
-    1. analytic gradient of the corridor cost at ``q0`` (endpoints zeroed - they
-       are hard conditions, not free variables);
-    2. ``Q + step_size * (-grad)`` re-projected through ``BoundaryDecoder`` so the
-       endpoint / heading conditions survive;
-    3. the resulting displacement is NORMALISED so its largest control move is
-       exactly ``max_delta_scene`` - the trust region is the step length, not a
-       cap that is never reached;
-    4. backtracking over ``backtrack_factors``; every trial is re-projected
-       through the decoder and its real cost is measured;
-    5. the first trial with ``J < J_before`` is accepted, otherwise the step is
-       REJECTED and ``q0`` comes back bit-for-bit.
-
-    Returns ``(q0_guided, stats)``.  No autograd, no network call, no ALM.
+    ``step_size`` is the initial gradient step (scene units); backtracking over
+    ``backtrack_factors`` shrinks an overshooting step, and only a trial with a
+    STRICT decrease of ``J`` is accepted - otherwise ``q0`` comes back unchanged.
     """
     factors = tuple(float(a) for a in (backtrack_factors or DEFAULT_BACKTRACK_FACTORS))
-    empty = _is_empty(pack, q0)
+    empty = sample_pack_is_empty(pack)
     if not empty:
         pack = pack.to(device=q0.device, dtype=q0.dtype)
     loss_before, grad, stats_before = constraint_loss_and_grad(q0, pack, margin_scene)
@@ -192,30 +174,26 @@ def clean_prediction_guidance(
     B = int(q0.shape[0])
     zero = q0.new_zeros(B)
 
-    # ---- 1-3: descent direction -> boundary projection -> trust-region length
-    q0_tmp = q0 - float(step_size) * grad
-    delta_eff = boundary_decoder(q0_tmp, start_goal, heading, heading_valid) - q0
-    delta_max = delta_eff.norm(dim=-1).amax(dim=-1)                    # [B]
-    usable = has & (delta_max > 0.0)
-    tr_scale = torch.where(usable,
-                           float(max_delta_scene) / (delta_max + 1e-12),
-                           torch.zeros_like(delta_max))
-    step = delta_eff * tr_scale[:, None, None]                         # |.|_max = max_delta
+    # ---- descent direction (endpoints are hard conditions, not variables) ---
+    direction = -float(step_size) * grad
+    direction_max = direction.norm(dim=-1).amax(dim=-1)                # [B]
+    usable = has & (direction_max > 0.0)
 
-    # ---- 4: backtracking line search, per sample
+    # ---- backtracking line search, per sample ------------------------------
     accepted = torch.zeros(B, dtype=torch.bool, device=q0.device)
     alpha = zero.clone()
     best = q0.clone()
-    best_loss = loss_before.clone()
+    best_loss = loss_before.detach().clone()
     trials = 0
     for a in factors:
         pending = usable & ~accepted
         if not bool(pending.any()):
             break
         trials += 1
-        candidate = boundary_decoder(q0 + a * step, start_goal, heading, heading_valid)
+        candidate = boundary_decoder(q0 + a * direction, start_goal, heading,
+                                     heading_valid)
         loss_try = _loss_at(candidate, pack, margin_scene)
-        improve = pending & (loss_try < loss_before)
+        improve = pending & (loss_try < best_loss)
         if bool(improve.any()):
             best = torch.where(improve[:, None, None], candidate, best)
             best_loss = torch.where(improve, loss_try, best_loss)
@@ -227,25 +205,25 @@ def clean_prediction_guidance(
     if empty:
         stats_after = _empty_stats(q0)
     else:
-        stats_after = violation_stats(*constraint_values(
-            q0_guided, pack, margin_scene)[1:], loss=best_loss)
+        _, raw, valid = sample_constraint_values(q0_guided, pack, margin_scene)
+        stats_after = violation_stats(raw, valid, best_loss.detach())
 
     delta = q0_guided - q0
     delta_norm = delta.norm(dim=-1)                                    # [B,C]
     stats = {
-        "safe_loss_before": loss_before,
+        "safe_loss_before": loss_before.detach(),
         "safe_loss_after": best_loss,
-        "safe_loss_ratio": torch.where(loss_before > 0,
-                                       best_loss / loss_before.clamp_min(1e-12),
-                                       torch.ones_like(loss_before)),
+        "safe_loss_ratio": torch.where(loss_before.detach() > 0,
+                                       best_loss / loss_before.detach().clamp_min(1e-12),
+                                       torch.ones_like(loss_before.detach())),
         "max_violation_before": stats_before["max_violation"],
         "max_violation_after": stats_after["max_violation"],
         "violated_count_before": stats_before["violated_count"],
         "violated_count_after": stats_after["violated_count"],
         "grad_norm": stats_before["grad_norm"],
+        "step_size": torch.full_like(zero, float(step_size)),
         "delta_rms_scene": delta_norm.square().mean(dim=-1).sqrt(),
         "delta_max_scene": delta_norm.amax(dim=-1),
-        "trust_region_scale": tr_scale,
         "accepted": accepted,
         "rejected": usable & ~accepted,
         "alpha": alpha,

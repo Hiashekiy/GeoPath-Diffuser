@@ -15,6 +15,15 @@ trajectory:
 diffusion:
   num_controls: 64        # 由 factory 从 trajectory 读取；显式写出便于检查
 
+sampling:
+  # 均匀弧长约束采样：CPCG 与末端 QP 共用这一份冻结的 sample pack
+  constraint_points: 256
+  arc_length_lookup_points: 1024
+
+clean_guidance:
+  # J = 1/(2M) Σ relu(g)^2，梯度步不再被归一化到固定米数，step_size 是真实步长
+  step_size: 50.0
+
 # ---- losses (TrajSafe-aligned; see src/gp_diffuser/training/losses.py) ------
 loss_weights:
   lambda_c: 1.0            # interior-control MSE, safety branch

@@ -48,34 +48,48 @@ def _to_np(value, dtype=np.float64) -> np.ndarray:
     return np.asarray(value, dtype=dtype)
 
 
-def _plot_bezier_pieces(ax, pack, controls, transform, to_m, max_pieces: int = 48):
-    """Draw the Bezier control polygons of the frozen constraint pack.
+def _plot_sampled_constraints(ax, pack, controls, transform, to_m,
+                              max_cells: int = 64):
+    """Draw the uniform-arc-length constraint samples and their owning cells.
 
-    ``beta_r = E_r Q`` are the four exact Bezier controls of every piece, so the
-    polygon drawn here is the convex hull the QP and CPCG actually constrain -
-    not a resampled curve.
+    ``P_l = N_l Q`` is the point the QP actually constrains, and each point is
+    constrained by exactly ONE convex cell, so the figure shows what the solver
+    sees instead of a Bezier control polygon.
     """
     if pack is None or controls is None:
         return
     try:
         import torch
 
-        extraction = pack.extraction
-        piece_mask = pack.piece_mask
-        if extraction.shape[1] == 0 or not bool(piece_mask.any()):
-            return
-        extraction = pack.extraction.detach().float().cpu()
+        from ..safety.bspline_sample_constraints import (region_polygons,
+                                                         sampled_points)
+        from ..safety.convex_region import halfspaces_to_vertices
+        from ..diffusion.clean_guidance import sample_constraint_values
+
         q = (controls if torch.is_tensor(controls) else torch.as_tensor(controls))
         q = (q[0:1] if q.dim() == 3 else q[None]).detach().float().cpu()
-        beta = torch.einsum("prk,bkd->bprd", extraction[0:1], q)[0]
-        keep = piece_mask[0].nonzero(as_tuple=False).squeeze(1).tolist()
-        if not keep:
+        if int(pack.sample_mask[0].sum()) == 0:
             return
-        stride = max(1, int(np.ceil(len(keep) / float(max_pieces))))
-        for i in keep[::stride]:
-            pts = to_m(beta[i].detach().cpu().numpy())
-            ax.plot(pts[:, 0], pts[:, 1], "-", color="#8c564b", lw=0.5,
-                    alpha=0.55, marker=".", ms=1.4)
+        points = sampled_points(pack, q, sample=0)
+        points_m = to_m(points)
+        polygons = region_polygons(pack, 0)[:max_cells]
+        for _rid, A, b in polygons:
+            poly = halfspaces_to_vertices(np.asarray(A, dtype=np.float64),
+                                          np.asarray(b, dtype=np.float64))
+            if poly is None or len(poly) < 3:
+                continue
+            poly_m = to_m(poly)
+            ax.plot(poly_m[:, 0], poly_m[:, 1], "-", color="#17becf", lw=0.5,
+                    alpha=0.45)
+        ax.plot(points_m[:, 0], points_m[:, 1], ".", color="#8c564b", ms=2.2,
+                alpha=0.9)
+        # the violating samples: exactly what CPCG / the QP push back inside
+        _, raw, valid = sample_constraint_values(q, pack)
+        violated = (torch.relu(raw) * valid).amax(dim=-1)[0].cpu().numpy()
+        bad = violated > 0.0
+        if bad.any():
+            ax.plot(points_m[bad, 0], points_m[bad, 1], "o", color="#e377c2",
+                    ms=4.0, mfc="none", mew=0.9)
     except Exception:                                  # visualisation must not fail
         return
 
@@ -200,8 +214,8 @@ def render_sample(out: Dict, sample: Dict, path: Optional[str] = None,
     else:
         ax.plot(traj[:, 0], traj[:, 1], color="#d62728", lw=2.4, label="final (128 pts)")
 
-    # the exact Bezier pieces of the frozen pack: b_r = E_r Q
-    _plot_bezier_pieces(ax, out.get("pack"), out["controls"], transform, to_m)
+    # the uniform-arc-length samples the QP constrains, each with its own cell
+    _plot_sampled_constraints(ax, out.get("pack"), out["controls"], transform, to_m)
 
     controls = out["controls"]
     controls = controls[0] if np.ndim(controls) == 3 else controls

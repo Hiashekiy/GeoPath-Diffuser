@@ -1,0 +1,801 @@
+{
+  "split": "test",
+  "steps": 12,
+  "checkpoint": "outputs\\checkpoints\\k4p_d2_t12_d4\\d2_last.pt",
+  "indices": [
+    0,
+    47,
+    93,
+    140,
+    186,
+    233,
+    279,
+    326,
+    372,
+    419,
+    300
+  ],
+  "rows": [
+    {
+      "index": 0,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.3152029276055923,
+          "guided_collision": 0.3152029276055923
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.31497354318049914,
+          "guided_collision": 0.16511569292377257
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        }
+      ]
+    },
+    {
+      "index": 47,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        }
+      ]
+    },
+    {
+      "index": 93,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0011777877807617188,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.65447382098564,
+          "guided_collision": 0.65447382098564
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.6532589973522351,
+          "guided_collision": 0.5897403655004952
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7667218951971042,
+          "guided_collision": 0.7446733472946865
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7662962918337162,
+          "guided_collision": 0.7441645990960529
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7670103502702943,
+          "guided_collision": 0.7450801139238954
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7683717690715195,
+          "guided_collision": 0.7468106575619508
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.769516944033828,
+          "guided_collision": 0.7482667679729171
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7698541936861311,
+          "guided_collision": 0.7486577836477453
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7695110036570656,
+          "guided_collision": 0.7482513938691838
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7692599718066755,
+          "guided_collision": 0.7479690274607104
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.769463817176185,
+          "guided_collision": 0.7482238396561061
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.7698606927408969,
+          "guided_collision": 0.7487086069855924
+        }
+      ]
+    },
+    {
+      "index": 140,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 2.384185791015625e-06,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.21274880756753045,
+          "guided_collision": 0.21274880756753045
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.21295880267567238,
+          "guided_collision": 0.18648704709849234
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.055030820637113335,
+          "guided_collision": 0.023721899916763833
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.05512424620977429,
+          "guided_collision": 0.023767082687133144
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.05416200166836334,
+          "guided_collision": 0.02357651914950443
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.05203596808388543,
+          "guided_collision": 0.022946891247568962
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.04935329112214475,
+          "guided_collision": 0.022053862204051623
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.04753998287237128,
+          "guided_collision": 0.02141026728329446
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0477691125327362,
+          "guided_collision": 0.02147457826820171
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.049975903404307735,
+          "guided_collision": 0.02225632513300089
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.05297925586927495,
+          "guided_collision": 0.02339254554534685
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.05526482374660929,
+          "guided_collision": 0.024375958111845644
+        }
+      ]
+    },
+    {
+      "index": 186,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 4.76837158203125e-06,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.6762633542761267,
+          "guided_collision": 0.6762633542761267
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.6769653489065809,
+          "guided_collision": 0.6412172178126335
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.39790083119842407,
+          "guided_collision": 0.24108252050368315
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.39843634663961347,
+          "guided_collision": 0.24151633988590135
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3981958738525075,
+          "guided_collision": 0.23853674920381973
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.39726736452133726,
+          "guided_collision": 0.23325296505782547
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3961716803165215,
+          "guided_collision": 0.22808888271233493
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.39548055666685267,
+          "guided_collision": 0.2245557124830413
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3953233535395224,
+          "guided_collision": 0.2227706443572236
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3954407267956214,
+          "guided_collision": 0.22143418297922868
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.39502840364582154,
+          "guided_collision": 0.21812585909224308
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.39452917206968774,
+          "guided_collision": 0.2148577363691297
+        }
+      ]
+    },
+    {
+      "index": 233,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        }
+      ]
+    },
+    {
+      "index": 279,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        }
+      ]
+    },
+    {
+      "index": 326,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0013208389282226562,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.5670747206150172,
+          "guided_collision": 0.5670747206150172
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.561262225735991,
+          "guided_collision": 0.06834240532314075
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6092368765643096,
+          "guided_collision": 0.4624243932459852
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6097179378357851,
+          "guided_collision": 0.46330944123205714
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6122395966480894,
+          "guided_collision": 0.46995370686781834
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6153901851379139,
+          "guided_collision": 0.4783868802807896
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6180972472658908,
+          "guided_collision": 0.44306129540231115
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.619491694016779,
+          "guided_collision": 0.42206373977900963
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6191589778985973,
+          "guided_collision": 0.4176351799476707
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6181558769373855,
+          "guided_collision": 0.41784221588736425
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6174154396546248,
+          "guided_collision": 0.41720584771578956
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.6168972999753445,
+          "guided_collision": 0.4183400118064349
+        }
+      ]
+    },
+    {
+      "index": 372,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 0.0,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.0,
+          "guided_collision": 0.0
+        }
+      ]
+    },
+    {
+      "index": 419,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 5.960464477539062e-07,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.4185775822367402,
+          "guided_collision": 0.4185775822367402
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.4175275527527626,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.380612964055598,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.38250948563615544,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.38233740872365585,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3805645585101837,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3790368346310098,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.37866756127822215,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.37840999337755354,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3791179529457774,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.38151869932086757,
+          "guided_collision": 0.0
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.3835768919780885,
+          "guided_collision": 0.0
+        }
+      ]
+    },
+    {
+      "index": 300,
+      "final": {
+        "collision": 0.0,
+        "min_clearance_m": null,
+        "corridor_violation_m": 4.76837158203125e-06,
+        "qp": "solved"
+      },
+      "frames": [
+        {
+          "mode": "map_only",
+          "collision": 0.7218925777829078,
+          "guided_collision": 0.7218925777829078
+        },
+        {
+          "mode": "map_only",
+          "collision": 0.7219630999793529,
+          "guided_collision": 0.47610527992731594
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.48915624189511836,
+          "guided_collision": 0.1890041270096317
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.4907009961136331,
+          "guided_collision": 0.19062154794463942
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.48918556239627536,
+          "guided_collision": 0.19153493481012812
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.48560177307820784,
+          "guided_collision": 0.19142852178970343
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.4823488288630967,
+          "guided_collision": 0.19106341230818052
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.4812200815553199,
+          "guided_collision": 0.19142477796248694
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.48139191691622313,
+          "guided_collision": 0.19292335909501782
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.4808841473221795,
+          "guided_collision": 0.19475341613494457
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.4791009392953027,
+          "guided_collision": 0.19594189312188737
+        },
+        {
+          "mode": "safety_conditioned",
+          "collision": 0.4763535751504706,
+          "guided_collision": 0.19601953316928267
+        }
+      ]
+    }
+  ]
+}

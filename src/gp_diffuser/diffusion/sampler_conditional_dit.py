@@ -46,8 +46,11 @@ import torch
 
 from ..frames import SceneTransform
 from ..models.boundary import BoundaryDecoder
+from ..safety.bspline_sample_constraints import (
+    DEFAULT_CONSTRAINT_POINTS, DEFAULT_LOOKUP_POINTS,
+    build_sampled_constraint_pack, sample_pack_is_empty)
 from ..safety.collision_query import curve_collision_intervals
-from ..safety.local_regions import pack_from_tables
+from ..safety.local_regions import sample_pack_from_tables
 from ..safety.safety_features import ellipse_shape4_to_scene
 from .clean_guidance import clean_prediction_guidance
 from .schedule import NoiseSchedule
@@ -158,6 +161,13 @@ class ConditionalDiTSampler:
             return int(sampling["dense_verify_points"])
         return int((self.cfg.get("alm") or {}).get("dense_verify_points", 512))
 
+    def _constraint_sample_cfg(self) -> Tuple[int, int]:
+        """``(constraint_points, arc_length_lookup_points)`` of the sample pack."""
+        sampling = self.cfg.get("sampling") or {}
+        points = int(sampling.get("constraint_points", DEFAULT_CONSTRAINT_POINTS))
+        lookup = int(sampling.get("arc_length_lookup_points", DEFAULT_LOOKUP_POINTS))
+        return max(points, 2), max(lookup, 2)
+
     @torch.no_grad()
     def _decode(self, controls: torch.Tensor, points: Optional[int] = None) -> torch.Tensor:
         if points is None:
@@ -192,16 +202,21 @@ class ConditionalDiTSampler:
         return torch.tensor(out, dtype=torch.float32, device=curve_scene.device)
 
     @staticmethod
-    def _max_corridor_violation(controls: torch.Tensor, pack) -> torch.Tensor:
-        """Largest satisfied-plane excess ``max(relu(A E Q - b))`` per sample ``[B]``."""
-        from .clean_guidance import constraint_values
+    def _max_sampled_violation(controls: torch.Tensor, pack) -> torch.Tensor:
+        """Largest half-space excess of the SAMPLED constraints, per sample ``[B]``.
 
-        if pack is None or pack.extraction.shape[1] == 0 or pack.piece_A.shape[2] == 0:
+        This is the violation of the sample pack (one convex cell per sample
+        point), i.e. exactly the quantity the terminal QP certifies.  It is not
+        a continuous corridor certificate.
+        """
+        from .clean_guidance import sample_constraint_values
+
+        if sample_pack_is_empty(pack):
             return controls.new_zeros(int(controls.shape[0]))
         pack = pack.to(device=controls.device, dtype=controls.dtype)
-        _, raw, valid = constraint_values(controls, pack)
+        _, raw, valid = sample_constraint_values(controls, pack)
         positive = torch.relu(raw) * valid
-        if positive.shape[1] == 0 or positive.shape[3] == 0:
+        if positive.shape[1] == 0 or positive.shape[2] == 0:
             return controls.new_zeros(int(controls.shape[0]))
         return positive.flatten(1).max(dim=1).values
 
@@ -273,9 +288,7 @@ class ConditionalDiTSampler:
         projection_on = (mode == "cpcg" and bool(proj_cfg.get("enabled", True))
                          and (True if final_projection is None
                               else bool(final_projection)))
-        step_size = float(guide_cfg.get("step_size", 1.0))
-        max_delta_scene = (float(guide_cfg.get("max_delta_m", 0.25))
-                           / float(self.transform.scale))
+        step_size = float(guide_cfg.get("step_size", 10.0))
         margin_scene = float(guide_cfg.get("margin_scene", 0.0))
         backtrack = tuple(float(a) for a in guide_cfg.get(
             "backtrack_factors", (1.0, 0.5, 0.25, 0.125, 0.0625)))
@@ -368,7 +381,8 @@ class ConditionalDiTSampler:
                 curve_scene = self._decode(pred)
                 guide_scene = curve_scene.clone()   # the map-only guide trajectory
                 safety_raw, search_stats = self._generate_safety(
-                    occupancy, sdf, features, curve_scene, start_goal, corridor_cfg)
+                    occupancy, sdf, features, curve_scene, start_goal, corridor_cfg,
+                    reference_controls=pred)
                 if safety_raw is not None:
                     timing.update(safety_raw["timing"])
                 timing["safety_total_s"] = time.perf_counter() - t0
@@ -407,8 +421,8 @@ class ConditionalDiTSampler:
                 t0 = time.perf_counter()
                 q0_used, guide_values = clean_prediction_guidance(
                     pred, pack, self.boundary, start_goal, heading, heading_valid,
-                    step_size=step_size, max_delta_scene=max_delta_scene,
-                    margin_scene=margin_scene, backtrack_factors=backtrack)
+                    step_size=step_size, margin_scene=margin_scene,
+                    backtrack_factors=backtrack)
                 timing["clean_guidance_s"] = (timing.get("clean_guidance_s", 0.0)
                                               + time.perf_counter() - t0)
                 # eps_guided = eps_pred - sqrt(ab/(1-ab)) * delta, so the implied
@@ -434,14 +448,15 @@ class ConditionalDiTSampler:
                                          * self.transform.scale),
                     "eps_guidance_delta_norm": float(
                         guide_values["delta_rms_scene"].mean() * eps_factor),
-                    "trust_region_scale": float(
-                        guide_values["trust_region_scale"].mean()),
+                    "step_size": float(guide_values["step_size"].mean()),
                     "alpha": (float(guide_values["alpha"][accepted].mean())
                               if accepted_n else 0.0),
                     "accepted_fraction": float(accepted.to(torch.float32).mean()),
                     "rejected_fraction": float(
                         guide_values["rejected"].to(torch.float32).mean()),
                     "backtrack_trials": float(guide_values["backtrack_trials"].max()),
+                    "violated_count_after": float(
+                        guide_values["violated_count_after"].sum()),
                     "accepted_masks": [bool(v) for v in guide_values["accepted"].cpu()],
                     "rejected_masks": [bool(v) for v in guide_values["rejected"].cpu()],
                     "guidance_applied_masks": [
@@ -486,7 +501,7 @@ class ConditionalDiTSampler:
         clearance = self._minimum_clearance(sdf, dense)
         endpoint_err = self._endpoint_error(curve_scene, start_goal)
         heading_err = self._heading_errors_deg(q, heading, heading_valid)
-        final_violation = self._max_corridor_violation(q, pack)
+        final_violation = self._max_sampled_violation(q, pack)
         final_correction = (q - controls_unprojected).norm(dim=-1)
         timing["final_validation_s"] = time.perf_counter() - t0
         timing["total_s"] = time.perf_counter() - t_all
@@ -499,16 +514,25 @@ class ConditionalDiTSampler:
                                  device=device)
         valid = collision_free & heading_ok & ~search_failed & endpoint_ok
 
-        # A corridor certificate exists ONLY when the terminal QP solved on a
-        # non-empty pack and the independent dense validation agrees.
+        # A sampled-constraint certificate exists ONLY when the terminal QP solved
+        # on a non-empty pack and the independent dense validation agrees.
         if projection_on:
             certified = qp_info["certified"].to(device).to(torch.bool)
         else:
             certified = torch.zeros(B, dtype=torch.bool, device=device)
+        # NOTE: "corridor_certified" keeps its historical name; with the sampled
+        # constraints it means "the M sampled points satisfy their own cell AND
+        # the independent dense validation is collision-free" - NOT a continuous
+        # certificate of the whole curve.
         corridor_certified = certified & collision_free
-        # "QP says inside the corridor but the curve still hits the map" means the
-        # corridor / map / validator disagree: keep the flag and the diagnostics
+        # "QP says the SAMPLES are inside their cells but the curve still hits the
+        # map" means corridor / map / validator disagree: keep the diagnostics
         inconsistency = certified & ~collision_free
+        # an EMPTY pack constrains nothing: it must never look "satisfied"
+        num_rows = int(pack.num_constraint_rows) if pack is not None else 0
+        sampled_satisfied = (final_violation <= 1e-4) & torch.full(
+            (B,), num_rows > 0, dtype=torch.bool, device=device)
+        pack_diag = (pack.diagnostics if pack is not None else {}) or {}
 
         return {
             "controls": q,
@@ -565,6 +589,18 @@ class ConditionalDiTSampler:
                 final_correction.max().item() * self.transform.scale)
             if final_correction.numel() else 0.0,
             "final_corridor_violation_scene": final_violation.detach().cpu(),
+            # ---- sampled-constraint semantics (spec section 7) --------------
+            "sampled_constraint_max_violation": float(
+                final_violation.max().item()) if final_violation.numel() else 0.0,
+            "sampled_constraints_satisfied": bool(sampled_satisfied.all().item()),
+            "sampled_constraints_satisfied_mask": sampled_satisfied.detach().cpu(),
+            "sampled_region_coverage_ok": bool(
+                pack_diag.get("sampling_coverage_ok", False) if pack is not None
+                else False),
+            "num_constraint_samples": int(pack.basis.shape[1]) if pack is not None else 0,
+            "num_constraint_rows": num_rows,
+            "dense_collision_free": bool(collision_free.all().item()),
+            "constraint_pack_summary": (pack.summary() if pack is not None else None),
             "x0_final_scene": (self._decode(controls_unprojected).detach().cpu().numpy()
                                if record_curves else None),
             "x0_projected_scene": (self._decode(q).detach().cpu().numpy()
@@ -578,8 +614,15 @@ class ConditionalDiTSampler:
     # -------------------------------------------------------- safety generation
     @torch.no_grad()
     def _generate_safety(self, occupancy, sdf, features, curve_scene, start_goal,
-                         corridor_cfg) -> Tuple[Optional[Dict], List[Dict]]:
-        """One guided search + one ellipse pass + one corridor build."""
+                         corridor_cfg,
+                         reference_controls=None) -> Tuple[Optional[Dict], List[Dict]]:
+        """One guided search + one ellipse pass + one corridor + ONE frozen pack.
+
+        ``reference_controls`` is the clean control polygon the geometry is built
+        from (``Q_ref``): its arc length defines the frozen sample parameters
+        ``u_l`` and therefore the constraint matrix.  It is used ONCE here; the
+        resulting pack is reused by every CPCG step and by the terminal QP.
+        """
         timing: Dict[str, float] = {}
         B = curve_scene.shape[0]
         tf = self.transform
@@ -635,47 +678,70 @@ class ConditionalDiTSampler:
         # the region builder exponentiates the log-axes, so it needs scene units
         shape4_scene = ellipse_shape4_to_scene(safety["ellipse_shape4"], scale)
 
-        # ---- convex corridor + constraint pack -----------------------------
+        # ---- convex corridor + frozen SAMPLED constraint pack --------------
         t0 = time.perf_counter()
         Q = int(centers_scene.shape[1])
         anchors = torch.linspace(0.0, 1.0, Q, dtype=torch.float64, device=device)
-        tables: List[Optional[Dict]] = []
         infos: List[Dict] = []
         path_scene = torch.as_tensor(
             tf.to_scene(path_m.detach().cpu().numpy()), dtype=torch.float32, device=device)
+        constraint_points, lookup_points = self._constraint_sample_cfg()
+        if reference_controls is None:
+            # callers that only have the decoded reference curve (diagnostics) get
+            # the endpoint-constrained least-squares control polygon back; the
+            # reverse loop always passes the clean prediction itself
+            reference_controls = self.codec.fit_curve_to_controls(
+                curve_scene, start_goal[:, 0], start_goal[:, 1])
         if self._corridor_mode() == "trajsafe":
             # VERBATIM TrajSafe construction (src/diffusion/alm_local.py): every
             # predicted ellipse -> convex cell, gap filling, then one closed
-            # safety corridor per sample (overlap + bridge), then the Bezier
-            # constraint pack.  No collision-interval restriction.
-            pack, pack_local, corridors = self._full_corridor_pack(
+            # safety corridor per sample (overlap + bridge).  No collision-interval
+            # restriction.  The constraint expression is the arc-length sampled
+            # B-spline pack, NOT a Bezier extraction.
+            corridors = self._full_corridor_list(
                 occupancy, centers_scene, shape4_scene, anchors, path_m,
                 ok_idx, corridor_cfg)
             for local_i, b in enumerate(ok_idx):
                 cor = corridors[local_i]
-                local_cells[b] = int(getattr(pack, "num_pieces", torch.zeros(B))[b]
-                                     if pack is not None else 0)
+                local_cells[b] = int(getattr(cor, "num_cells", 0))
                 infos.append({"index": int(b),
                               "local_cells": int(local_cells[b].item()),
                               "valid": bool(getattr(cor, "valid", False)),
                               "failure_reason": getattr(cor, "failure_reason", "") or "",
                               "spans": None})
+            pack = build_sampled_constraint_pack(
+                self.codec, corridors, reference_controls,
+                constraint_points=constraint_points,
+                arc_length_lookup_points=lookup_points,
+                margin=float(corridor_cfg.get("constraint_margin_scene", 0.0)),
+                device=device)
+            pack_local = pack
             timing["corridor_s"] = time.perf_counter() - t0
         else:
+            tables_full: List[Optional[Dict]] = [None] * B
             for local_i, b in enumerate(ok_idx):
                 table, info = self._region_table(
                     occupancy[b:b + 1], centers_scene[local_i], shape4_scene[local_i],
                     anchors, curve_scene[b], path_scene[local_i],
                     corridor_cfg, scope="local")
-                tables.append(table)
+                tables_full[b] = table
                 local_cells[b] = int(info["local_cells"])
                 infos.append({"index": int(b), **info})
             timing["corridor_s"] = time.perf_counter() - t0
             # the guidance/QP gets the full pack (local cells + map box), while the
-            # reported corridor violation and the training loss use LOCAL only
-            pack = pack_from_tables(self.codec, tables, include_box=True, device=device)
-            pack_local = pack_from_tables(self.codec, tables, include_box=False,
-                                          device=device)
+            # reported local violation statistics ignore the map box
+            pack = sample_pack_from_tables(
+                self.codec, tables_full, reference_controls,
+                constraint_points=constraint_points,
+                arc_length_lookup_points=lookup_points,
+                margin=float(corridor_cfg.get("constraint_margin_scene", 0.0)),
+                include_box=True, device=device)
+            pack_local = sample_pack_from_tables(
+                self.codec, tables_full, reference_controls,
+                constraint_points=constraint_points,
+                arc_length_lookup_points=lookup_points,
+                margin=float(corridor_cfg.get("constraint_margin_scene", 0.0)),
+                include_box=False, device=device)
 
         # ---- scatter the per-sample geometry back to the full batch -------
         path_len = int(path_m.shape[1])
@@ -723,9 +789,9 @@ class ConditionalDiTSampler:
         }
         return raw, search_stats
 
-    def _full_corridor_pack(self, occupancy, centers_scene, shape4_scene, anchors,
+    def _full_corridor_list(self, occupancy, centers_scene, shape4_scene, anchors,
                             path_m, ok_idx, corridor_cfg):
-        """TrajSafe's FULL construction: every ellipse -> corridor -> pack.
+        """TrajSafe's FULL construction: every ellipse -> one closed corridor.
 
         This is the sequence of ``vendor/trajsafe/alm_local.py`` (their
         ``alm_closed_loop``), minus the ALM call itself:
@@ -733,13 +799,13 @@ class ConditionalDiTSampler:
             EllipseRegionBuilder.build_from_ellipse -> per-query convex cells
             densify_ellipses                        -> fill the corridor gaps
             build_safety_corridor                   -> one closed corridor
-            build_constraint_pack                   -> Bezier-extracted constraints
 
         Nothing here restricts the regions to the collision intervals; the whole
         predicted ellipse chain is used.  The geometry parameters come from the
         ``corridor`` config block only (the ALM block is no longer consulted).
+        The constraints are then expressed on uniform-arc-length curve samples by
+        :func:`build_sampled_constraint_pack` (no Bezier extraction).
         """
-        from ..safety.bspline_constraints import build_constraint_pack
         from ..safety.convex_region import EllipseRegionBuilder
         from ..safety.safety_corridor import build_safety_corridor
         from ..vendor.trajsafe.ellipse_densify import densify_ellipses
@@ -773,10 +839,7 @@ class ConditionalDiTSampler:
                 gamma_lengths=max(int(path_scene_full.shape[1]), 1),
                 config=corridor_cfg)
 
-        pack = build_constraint_pack(
-            self.codec, corridors, device=self.device, dtype=torch.float32,
-            margin=float(corridor_cfg.get("constraint_margin_scene", 0.0)))
-        return pack, pack, corridors
+        return corridors
 
     def _region_table(self, occupancy_b, centers_scene, shape4_scene, anchors,
                       curve_scene, path_scene, corridor_cfg, scope="local"):

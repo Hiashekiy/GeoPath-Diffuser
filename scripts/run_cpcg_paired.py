@@ -79,13 +79,16 @@ def _stats(values) -> dict:
 
 
 def _pack_equals(a, b) -> bool:
+    """True when two runs froze the SAME sample pack (same arc length, same cells)."""
     if a is None or b is None:
         return a is None and b is None
-    return (torch.equal(a.extraction, b.extraction)
-            and torch.equal(a.piece_A, b.piece_A)
-            and torch.equal(a.piece_b, b.piece_b)
+    return (torch.equal(a.basis, b.basis)
+            and torch.equal(a.sample_u, b.sample_u)
+            and torch.equal(a.region_id, b.region_id)
+            and torch.equal(a.sample_A, b.sample_A)
+            and torch.equal(a.sample_b, b.sample_b)
             and torch.equal(a.face_mask, b.face_mask)
-            and torch.equal(a.piece_mask, b.piece_mask))
+            and torch.equal(a.sample_mask, b.sample_mask))
 
 
 def run_group(pipe, item, group: dict, steps: int, seed: int, res_m: float) -> dict:
@@ -135,12 +138,28 @@ def run_group(pipe, item, group: dict, steps: int, seed: int, res_m: float) -> d
         "guidance_delta_max_m": _stats([g["delta_max_m"] for g in guidance]),
         "guidance_delta_rms_scene": _stats([g["delta_rms_scene"] for g in guidance]),
         "final_qp_status": (qp.get("status") if qp else []),
+        "final_qp_failure_reason": (None if not qp
+                                    else qp.get("per_sample", [{}])[0].get(
+                                        "failure_reason")),
+        "endpoint_violation_scene": (None if not qp
+                                     else qp.get("endpoint_violation_scene")),
         "final_qp_iterations": (qp.get("iterations") if qp else []),
         "final_qp_time_s": float(out.get("final_qp_time_s", 0.0)),
         "final_projection_correction_m": float(
             out.get("final_projection_correction_m", 0.0)),
         "final_corridor_violation_m": float(
             out.get("final_qp_max_violation_scene", 0.0) * transform.scale),
+        # ---- sampled-constraint semantics (NOT a continuous certificate) ----
+        "sampled_constraint_max_violation_m": float(
+            out.get("sampled_constraint_max_violation", 0.0)) * transform.scale,
+        "sampled_constraints_satisfied": bool(
+            out.get("sampled_constraints_satisfied", False)),
+        "sampled_region_coverage_ok": bool(
+            out.get("sampled_region_coverage_ok", False)),
+        "num_constraint_samples": int(out.get("num_constraint_samples", 0)),
+        "num_constraint_rows": int(out.get("num_constraint_rows", 0)),
+        "dense_collision_fraction": float(out.get("dense_collision_fraction", 0.0)),
+        "dense_collision_free": bool(out.get("dense_collision_free", False)),
         "timing_s": {k: round(v, 4) for k, v in out["timing"].items()},
         "inference_s": elapsed,
         "trajectory_m": traj_m,
@@ -284,6 +303,14 @@ def _aggregate(samples: list) -> dict:
                                         if r.get("corridor_certified"))),
             "projection_correction_m": mean("final_projection_correction_m",
                                             lambda v: v > 0.0),
+            "sampled_violation_m": mean("sampled_constraint_max_violation_m"),
+            "sampled_satisfied_scenes": int(sum(
+                1 for r in rows if r.get("sampled_constraints_satisfied"))),
+            "coverage_ok_scenes": int(sum(
+                1 for r in rows if r.get("sampled_region_coverage_ok"))),
+            "dense_collision_free_scenes": int(sum(
+                1 for r in rows if r.get("dense_collision_free"))),
+            "constraint_rows_mean": mean("num_constraint_rows"),
             "inference_s": mean("inference_s"),
         }
     return out
@@ -291,10 +318,12 @@ def _aggregate(samples: list) -> dict:
 
 def _print_aggregate(agg: dict) -> None:
     for name, row in agg.items():
-        print("   [%s] scenes=%d collision=%.4f free=%d step_viol mean/max=%s/%s "
+        print("   [%s] scenes=%d collision=%.4f free=%d sampled_sat=%d coverage=%d "
+              "step_viol mean/max=%s/%s "
               "final_viol=%s qp_solved=%d cert=%d corr=%s t=%.2fs"
               % (name, row["scenes"], row["collision_rate"],
                  row["collision_free_scenes"],
+                 row["sampled_satisfied_scenes"], row["coverage_ok_scenes"],
                  "-" if row["step_violation_mean_m"] is None
                  else "%.3f" % row["step_violation_mean_m"],
                  "-" if row["step_violation_max_m"] is None

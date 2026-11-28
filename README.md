@@ -39,13 +39,15 @@ Q_T ~ N(0,I) ──→ Map-only DDIM 前段 ──→ 初始全局引导轨迹
         Map-only 分支：只用 Map Context；安全分支：每层额外一条
         Safety Cross-Attention（独立参数 + 可学习门控 α_l，初始 0.1）
                                                   │
-                          每步 CPCG：q0_guided = q0 − η·∇_q0 J_corridor(q0)
-                          （解析梯度：不反传 DiT，Trust Region 限幅，端点/朝向保持）
+                  每步 CPCG：q0_guided = q0 − α·η·∇_q0 J(q0)，J = 1/(2M) Σ relu(A_j(l)N_lQ − b_j(l))²
+                  （解析梯度：不反传 DiT；均匀弧长采样点，每点只受它所属那一个凸区域约束；
+                   端点/朝向保持；backtracking 只接受 J 严格下降的步，位移不再归一化到固定米数）
                                                   │
                                        DDIM 状态更新（q0_used = q0_guided）
                                                   │
                         全部反向步结束 → 一次末端凸 QP（OSQP）：min ‖Q−Q_guided‖²
-                                          s.t. A_jE_{l,r}Q ≤ b_j, Q_0=S, Q_{C−1}=G
+                                          s.t. A_j(l)N_lQ ≤ b_j(l)（同一批 256 个采样点）,
+                                               Q_0=S, Q_{C−1}=G
                                                   │
                                       最终控制点 → 128 点轨迹
                                                   │
@@ -55,6 +57,10 @@ Q_T ~ N(0,I) ──→ Map-only DDIM 前段 ──→ 初始全局引导轨迹
 * **没有历史反馈**：CPCG 的干净预测修正只进入当前 DDIM 状态更新（`q0_used`），不编码、不缓存、不回灌网络，也不增加模型前向次数。
 * **不用 ALM**：`diffusion/bspline_alm.py` 仅作历史/对照保留，活动推理链路不再 import 它；对带噪状态不施加碰撞半空间，也不对 DiT 反传。
 * **不重复昂贵操作**：搜索 / 椭圆 / 走廊各只做一次，后续反向步复用同一个 pack（测试断言了对象同一性）。
+* **约束表达（2026 改造）**：推理期不再做 Bezier 抽取。安全几何生成时用参考控制点 `Q_ref` 求一次均匀**弧长**采样
+  `u_l`（`M = sampling.constraint_points`），并把 `N_l = N(u_l)`、每个采样点唯一归属的凸区域 `j(l)` 一起冻结；
+  CPCG 与末端 QP 共用同一个 sample pack，约束恒为 `A_{j(l)} N_l Q ≤ b_{j(l)}`。
+  采样只保证这 M 个点满足各自区域，**不构成整条连续曲线的数学安全证书**，最终仍由 512 点独立碰撞验证判定。
 
 ### 训练（单阶段双路联合，一次反向）
 
@@ -74,14 +80,15 @@ Q_T ~ N(0,I) ──→ Map-only DDIM 前段 ──→ 初始全局引导轨迹
 ## 2. 目录
 
 ```text
-configs/                 default.yaml（全量配置）、c64_longpath.yaml
+configs/                 base.yaml（全量基线，T=12）、c64_t12.yaml、k4p_160m_t12_c32.yaml、c64_longpath.yaml
 references/              Astar-Diffusion / PathSafe-Ellipse / TrajSafe-Diffuser（只读克隆）
 src/gp_diffuser/
   config.py frames.py factory.py
   map_encoder/           resunet.py（迁移）、frozen_encoder.py
   guidance/              Astar-Diffusion 全量迁移 + search.py 适配层
-  safety/                psenet.py sampling.py convex_region.py safety_corridor.py bspline_constraints.py（迁移）
-                         safety_features.py psenet_inputs.py local_regions.py qp_projection.py（新写）
+  safety/                psenet.py sampling.py convex_region.py safety_corridor.py bspline_constraints.py（迁移，
+                         训练/历史 Bezier 包）safety_features.py psenet_inputs.py local_regions.py
+                         bspline_sample_constraints.py（新写，推理期均匀弧长采样包）qp_projection.py（新写）
   trajectory/            bspline.py（迁移）、dense_path.py
   diffusion/             schedule.py sampler_conditional_dit.py clean_guidance.py（新写）
                          bspline_alm.py（历史/对照，不在活动链路）
@@ -160,7 +167,7 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 大小/mtime 的 sha256）；换配置或换 checkpoint 后 `load_safety_cache` 会拒绝旧缓存并提示重建，
 不会静默用错数据。
 
-## 4. 配置要点（`configs/default.yaml`）
+## 4. 配置要点（`configs/base.yaml`）
 | 段 | 关键值 | 说明 |
 |---|---|---|
 | `map_encoder` | `checkpoint: references/PathSafe-Ellipse/checkpoints/v3_best.pt`，`freeze: true` | 架构从 checkpoint 内嵌 `cfg` 重建，不猜 YAML |
@@ -172,10 +179,10 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 | `guidance` | `lam 0.01 / weight linear / policy B3_linear_fusion / alpha 0.25 / path_points 128` | 上游实测最优组合；λ 随地图尺度调整 |
 | `safety_condition` | **仅 64 椭圆** `[cx,cy,a,b,cos2θ,sin2θ]`；`path_tokens: false` | 搜索路径仍用于椭圆中心线/碰撞投影/凸区域，但不进入 Diffusion |
 | `corridor` | `mode trajsafe`、`min_overlap_ratio 0.10`、`bridge`、`region.*`（含 `safety_margin 0.02`）、`constraint_margin_scene 0.0`、`local.*`、`training_scope full` | 几何参数已从 `alm` 解耦（`scripts/verify_corridor_equivalence.py` 证明逐位不变） |
-| `clean_guidance` | `enabled true`、`method analytic_squared_hinge_unormalised`、`step_size 1.0`、`max_delta_m 0.5`、`backtrack_factors [1,.5,.25,.125,.0625]`、`margin_scene 0.0` | CPCG：`J = 0.5·Σrelu(g+margin)²`（**不除违反个数**）+ 解析梯度 → BoundaryDecoder 重投影 → 归一化到 `max_delta_m`（Trust Region 就是步长）→ backtracking 只接受 `J` 严格下降的步 |
+| `clean_guidance` | `enabled true`、`method analytic_squared_hinge_unormalised`、`step_size 50.0`、`backtrack_factors [1,.5,.25,.125,.0625]`、`margin_scene 0.0` | CPCG：`J = 1/(2M)·Σrelu(g+margin)²`，`M` 固定为采样点数（**不除违反个数**）+ 解析梯度 `∇J = (1/M)Σ relu(g+δ)a_{j(l),f}N_l` → BoundaryDecoder 重投影 → **不再**把位移归一化到固定 `max_delta_m`，`step_size` 就是真实梯度步长 → backtracking 只接受 `J` 严格下降的步 |
 | `final_projection` | `enabled true`、`solver osqp`、`eps 1e-5`、`max_iter 10000`、`polish true`、`feasibility_tol_scene 1e-4` | 采样结束后一次末端凸 QP |
 | `alm` | `enabled false`（历史/对照，不在活动链路） | 只为 `tests/test_alm.py` 保留 |
-| `sampling` | **`steps 8`**（默认执行 8 个反向步）、`mid_forward_fraction 0.5`、`dense_verify_points 512` | 8 步 = 在训练好的 1000 点噪声表上均匀取 8 个时刻（DDIM 子采样），无需重训；`steps >= train_diffusion_steps` 才是满表 |
+| `sampling` | **`steps 8`**（默认执行 8 个反向步）、`mid_forward_fraction 0.5`、`constraint_points 256`、`arc_length_lookup_points 1024`、`dense_verify_points 512` | 8 步 = 在训练好的 1000 点噪声表上均匀取 8 个时刻（DDIM 子采样），无需重训；`steps >= train_diffusion_steps` 才是满表 |
 | `loss_weights` | `λu 1.0 / λc 1.0 / λalign 0.5 / λcol 1.0 / λcorr 1.0` | 待验证集调 |
 
 ### 4.1 网络规模（实测，CPU 构建）

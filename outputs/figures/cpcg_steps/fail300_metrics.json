@@ -1,0 +1,516 @@
+{
+  "sample_index": 300,
+  "mode": "cpcg",
+  "steps": 12,
+  "projection": true,
+  "checkpoint": "outputs\\checkpoints\\k4p_d2_t12_d4\\d2_last.pt",
+  "per_step": [
+    {
+      "forward": 0,
+      "t": 11,
+      "t_prev": 10,
+      "model_branch": "map_only",
+      "guidance_applied": false,
+      "collision_fraction": 0.7218925777829078,
+      "collision_intervals": 4,
+      "corridor_violation_m": 58.630789826746366,
+      "sampled_violation_before_m": null,
+      "sampled_violation_after_m": null,
+      "length_m": 155.93341551225595,
+      "guidance": null,
+      "guided_collision_fraction": 0.7218925777829078
+    },
+    {
+      "forward": 1,
+      "t": 10,
+      "t_prev": 9,
+      "model_branch": "map_only",
+      "guidance_applied": true,
+      "collision_fraction": 0.7219630999793529,
+      "collision_intervals": 4,
+      "corridor_violation_m": 58.498325010987955,
+      "sampled_violation_before_m": 58.52456092834473,
+      "sampled_violation_after_m": 11.169648170471191,
+      "length_m": 155.92790041805625,
+      "guidance": {
+        "safe_loss_before": 0.09986574947834015,
+        "safe_loss_after": 0.00124112400226295,
+        "safe_loss_ratio": 0.012427924200892448,
+        "max_violation_before": 0.7315570116043091,
+        "max_violation_after": 0.1396206021308899,
+        "violated_count_before": 572.0,
+        "grad_norm": 0.11908414214849472,
+        "delta_rms_scene": 0.4210260510444641,
+        "delta_max_scene": 1.0173453092575073,
+        "delta_max_m": 81.38762664794922,
+        "eps_guidance_delta_norm": 0.0549885593354702,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 262.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.47610527992731594
+    },
+    {
+      "forward": 2,
+      "t": 9,
+      "t_prev": 8,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.48915624189511836,
+      "collision_intervals": 1,
+      "corridor_violation_m": 21.219087823304648,
+      "sampled_violation_before_m": 21.31760597229004,
+      "sampled_violation_after_m": 2.867445945739746,
+      "length_m": 179.34596271564934,
+      "guidance": {
+        "safe_loss_before": 0.004549377132207155,
+        "safe_loss_after": 2.0726023649331182e-05,
+        "safe_loss_ratio": 0.004555793479084969,
+        "max_violation_before": 0.2664700746536255,
+        "max_violation_after": 0.035843074321746826,
+        "violated_count_before": 237.0,
+        "grad_norm": 0.02398083359003067,
+        "delta_rms_scene": 0.08478505164384842,
+        "delta_max_scene": 0.2553142309188843,
+        "delta_max_m": 20.425138473510742,
+        "eps_guidance_delta_norm": 0.02253125235438347,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 63.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.1890041270096317
+    },
+    {
+      "forward": 3,
+      "t": 8,
+      "t_prev": 7,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.4907009961136331,
+      "collision_intervals": 1,
+      "corridor_violation_m": 21.21024456179974,
+      "sampled_violation_before_m": 21.307411193847656,
+      "sampled_violation_after_m": 2.8746795654296875,
+      "length_m": 179.36943106195753,
+      "guidance": {
+        "safe_loss_before": 0.004549333825707436,
+        "safe_loss_after": 2.0908850274281576e-05,
+        "safe_loss_ratio": 0.004596024751663208,
+        "max_violation_before": 0.2663426399230957,
+        "max_violation_after": 0.035933494567871094,
+        "violated_count_before": 238.0,
+        "grad_norm": 0.02397839166224003,
+        "delta_rms_scene": 0.08477640897035599,
+        "delta_max_scene": 0.2547919452190399,
+        "delta_max_m": 20.38335609436035,
+        "eps_guidance_delta_norm": 0.03480954468250275,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 64.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19062154794463942
+    },
+    {
+      "forward": 4,
+      "t": 7,
+      "t_prev": 6,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.48918556239627536,
+      "collision_intervals": 1,
+      "corridor_violation_m": 21.107761305715727,
+      "sampled_violation_before_m": 21.203699111938477,
+      "sampled_violation_after_m": 2.9170894622802734,
+      "length_m": 179.4861906564238,
+      "guidance": {
+        "safe_loss_before": 0.004480660427361727,
+        "safe_loss_after": 2.1393389033619314e-05,
+        "safe_loss_ratio": 0.004774606321007013,
+        "max_violation_before": 0.26504623889923096,
+        "max_violation_after": 0.03646361827850342,
+        "violated_count_before": 236.0,
+        "grad_norm": 0.023772412911057472,
+        "delta_rms_scene": 0.08404817432165146,
+        "delta_max_scene": 0.252827912569046,
+        "delta_max_m": 20.226232528686523,
+        "eps_guidance_delta_norm": 0.04806561395525932,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 64.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19153493481012812
+    },
+    {
+      "forward": 5,
+      "t": 6,
+      "t_prev": 5,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.48560177307820784,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.964374693140968,
+      "sampled_violation_before_m": 21.059517860412598,
+      "sampled_violation_after_m": 2.974076271057129,
+      "length_m": 179.64253540977387,
+      "guidance": {
+        "safe_loss_before": 0.004381072241812944,
+        "safe_loss_after": 2.198961919930298e-05,
+        "safe_loss_ratio": 0.005019232165068388,
+        "max_violation_before": 0.26324397325515747,
+        "max_violation_after": 0.03717595338821411,
+        "violated_count_before": 235.0,
+        "grad_norm": 0.02347218431532383,
+        "delta_rms_scene": 0.08298670500516891,
+        "delta_max_scene": 0.25038719177246094,
+        "delta_max_m": 20.030975341796875,
+        "eps_guidance_delta_norm": 0.06300349533557892,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 65.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19142852178970343
+    },
+    {
+      "forward": 6,
+      "t": 5,
+      "t_prev": 4,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.4823488288630967,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.853319508956645,
+      "sampled_violation_before_m": 20.947961807250977,
+      "sampled_violation_after_m": 3.0187082290649414,
+      "length_m": 179.76948697095804,
+      "guidance": {
+        "safe_loss_before": 0.004303629510104656,
+        "safe_loss_after": 2.2443178750108927e-05,
+        "safe_loss_ratio": 0.005214942153543234,
+        "max_violation_before": 0.2618495225906372,
+        "max_violation_after": 0.03773385286331177,
+        "violated_count_before": 232.0,
+        "grad_norm": 0.023236386477947235,
+        "delta_rms_scene": 0.08215302973985672,
+        "delta_max_scene": 0.24857011437416077,
+        "delta_max_m": 19.885608673095703,
+        "eps_guidance_delta_norm": 0.08114764839410782,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 64.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19106341230818052
+    },
+    {
+      "forward": 7,
+      "t": 4,
+      "t_prev": 3,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.4812200815553199,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.805966448947473,
+      "sampled_violation_before_m": 20.89996337890625,
+      "sampled_violation_after_m": 3.039994239807129,
+      "length_m": 179.84106685865706,
+      "guidance": {
+        "safe_loss_before": 0.00427192123606801,
+        "safe_loss_after": 2.269961805723142e-05,
+        "safe_loss_ratio": 0.005313679110258818,
+        "max_violation_before": 0.2612495422363281,
+        "max_violation_after": 0.03799992799758911,
+        "violated_count_before": 231.0,
+        "grad_norm": 0.02313857711851597,
+        "delta_rms_scene": 0.0818072184920311,
+        "delta_max_scene": 0.24763432145118713,
+        "delta_max_m": 19.810745239257812,
+        "eps_guidance_delta_norm": 0.10504458099603653,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 64.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19142477796248694
+    },
+    {
+      "forward": 8,
+      "t": 3,
+      "t_prev": 2,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.48139191691622313,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.772388000709867,
+      "sampled_violation_before_m": 20.865068435668945,
+      "sampled_violation_after_m": 3.0574655532836914,
+      "length_m": 179.9182579031077,
+      "guidance": {
+        "safe_loss_before": 0.004254085943102837,
+        "safe_loss_after": 2.2995236577116884e-05,
+        "safe_loss_ratio": 0.005405446980148554,
+        "max_violation_before": 0.2608133554458618,
+        "max_violation_after": 0.03821831941604614,
+        "violated_count_before": 231.0,
+        "grad_norm": 0.023082105442881584,
+        "delta_rms_scene": 0.08160756528377533,
+        "delta_max_scene": 0.24644136428833008,
+        "delta_max_m": 19.715309143066406,
+        "eps_guidance_delta_norm": 0.13871580362319946,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 64.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19292335909501782
+    },
+    {
+      "forward": 9,
+      "t": 2,
+      "t_prev": 1,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.4808841473221795,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.697411478178438,
+      "sampled_violation_before_m": 20.788249969482422,
+      "sampled_violation_after_m": 3.091573715209961,
+      "length_m": 180.05041682221233,
+      "guidance": {
+        "safe_loss_before": 0.0042104097083210945,
+        "safe_loss_after": 2.3509021048084833e-05,
+        "safe_loss_ratio": 0.005583547055721283,
+        "max_violation_before": 0.2598531246185303,
+        "max_violation_after": 0.03864467144012451,
+        "violated_count_before": 232.0,
+        "grad_norm": 0.022945431992411613,
+        "delta_rms_scene": 0.08112435787916183,
+        "delta_max_scene": 0.24423617124557495,
+        "delta_max_m": 19.538894653320312,
+        "eps_guidance_delta_norm": 0.19088317453861237,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 62.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19475341613494457
+    },
+    {
+      "forward": 10,
+      "t": 1,
+      "t_prev": 0,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.4791009392953027,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.585758858776657,
+      "sampled_violation_before_m": 20.67495346069336,
+      "sampled_violation_after_m": 3.139815330505371,
+      "length_m": 180.2118517676638,
+      "guidance": {
+        "safe_loss_before": 0.004138653632253408,
+        "safe_loss_after": 2.413097899989225e-05,
+        "safe_loss_ratio": 0.005830634851008654,
+        "max_violation_before": 0.258436918258667,
+        "max_violation_after": 0.03924769163131714,
+        "violated_count_before": 232.0,
+        "grad_norm": 0.022721167653799057,
+        "delta_rms_scene": 0.0803314596414566,
+        "delta_max_scene": 0.24158284068107605,
+        "delta_max_m": 19.326627731323242,
+        "eps_guidance_delta_norm": 0.2881172299385071,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 63.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19594189312188737
+    },
+    {
+      "forward": 11,
+      "t": 0,
+      "t_prev": -1,
+      "model_branch": "safety_conditioned",
+      "guidance_applied": true,
+      "collision_fraction": 0.4763535751504706,
+      "collision_intervals": 1,
+      "corridor_violation_m": 20.473054889761855,
+      "sampled_violation_before_m": 20.561237335205078,
+      "sampled_violation_after_m": 3.188037872314453,
+      "length_m": 180.35871112243635,
+      "guidance": {
+        "safe_loss_before": 0.004060756415128708,
+        "safe_loss_after": 2.4676048269611783e-05,
+        "safe_loss_ratio": 0.0060767121613025665,
+        "max_violation_before": 0.2570154666900635,
+        "max_violation_after": 0.039850473403930664,
+        "violated_count_before": 228.0,
+        "grad_norm": 0.022477367892861366,
+        "delta_rms_scene": 0.07946949452161789,
+        "delta_max_scene": 0.2392885386943817,
+        "delta_max_m": 19.143083572387695,
+        "eps_guidance_delta_norm": 0.556735634803772,
+        "step_size": 20.0,
+        "alpha": 1.0,
+        "accepted_fraction": 1.0,
+        "rejected_fraction": 0.0,
+        "backtrack_trials": 1.0,
+        "violated_count_after": 62.0,
+        "accepted_masks": [
+          true
+        ],
+        "rejected_masks": [
+          false
+        ],
+        "guidance_applied_masks": [
+          true
+        ]
+      },
+      "guided_collision_fraction": 0.19601953316928267
+    }
+  ],
+  "final": {
+    "collision_fraction": 0.0,
+    "collision_intervals": 0,
+    "min_clearance_m": 0.4872128963470459,
+    "endpoint_error_scene": 0.0,
+    "heading_error_deg": [
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "qp_status": [
+      "solved"
+    ],
+    "qp_iterations": [
+      200
+    ],
+    "qp_certified": true,
+    "qp_correction_m": 4.052896499633789,
+    "sampled_constraint_max_violation_scene": 5.960464477539063e-08,
+    "sampled_constraint_max_violation_m": 4.76837158203125e-06,
+    "sampled_constraints_satisfied": true,
+    "sampled_region_coverage_ok": true,
+    "num_constraint_samples": 256,
+    "num_constraint_rows": 2695,
+    "dense_collision_free": true,
+    "valid": true
+  },
+  "figure": "outputs\\figures\\cpcg_steps\\fail300.png",
+  "collision_figure": "outputs\\figures\\cpcg_steps\\fail300_collision.png"
+}

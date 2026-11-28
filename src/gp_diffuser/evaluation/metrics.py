@@ -104,17 +104,27 @@ def trajectory_metrics(points_m: np.ndarray, occupancy: np.ndarray, sdf: np.ndar
 def corridor_violation_m(points_m: np.ndarray, pack, scene_scale: float,
                          params: Optional[np.ndarray] = None,
                          offset: float = 0.0) -> float:
-    """Largest half-space violation of the frozen corridor along the trajectory.
+    """Largest half-space violation of the frozen constraints along a curve.
 
-    Each piece of the pack owns one parameter interval of the curve, so a point is
-    only tested against the faces of ITS piece (testing every piece against every
-    point would report meaningless "violations" from far-away cells).
+    Two pack flavours are understood:
+
+    * :class:`~gp_diffuser.safety.bspline_sample_constraints.BSplineSampleConstraintPack`
+      (the inference pack): every point is judged by the cell of the SAMPLE whose
+      arc-length progress is closest to its own progress.  A sample point owns
+      exactly one cell, so this is the same "responsibility" rule the guidance and
+      the QP use - never "test every cell against every point".
+    * the historical Bezier pack (``piece_mask`` / ``intervals``): a point is only
+      tested against the piece whose parameter interval contains it.
 
     ``SceneTransform.to_scene`` is ``x / scene_scale + offset`` (``offset =
     -1 + 1/grid``), so ``offset`` MUST be passed: dropping it shifts every test
     point by one whole scene unit (32 m here) and fabricates a huge violation.
     """
-    if pack is None or pack.piece_mask.shape[1] == 0:
+    if pack is None:
+        return 0.0
+    if hasattr(pack, "sample_mask"):                       # sampled pack
+        return _sampled_violation_m(points_m, pack, scene_scale, params, offset)
+    if pack.piece_mask.shape[1] == 0:
         return 0.0
     pts_scene = (np.asarray(points_m, dtype=np.float64).reshape(-1, 2)
                  / float(scene_scale) + float(offset))
@@ -140,6 +150,43 @@ def corridor_violation_m(points_m: np.ndarray, pack, scene_scale: float,
             if not faces.any():
                 continue
             g = pts_scene[select] @ A[sample, piece][faces].T - b[sample, piece][faces]
+            worst = max(worst, float(np.max(g)))
+    return worst * float(scene_scale)
+
+
+def _sampled_violation_m(points_m, pack, scene_scale: float,
+                         params: Optional[np.ndarray] = None,
+                         offset: float = 0.0) -> float:
+    """Violation of a curve against the sampled pack (one cell per sample point).
+
+    Each curve point inherits the cell of the pack sample whose FROZEN parameter
+    ``u_l`` is closest to its own, which is the same responsibility rule CPCG and
+    the QP use.  It is a diagnostic, not a certificate.
+    """
+    pts_scene = (np.asarray(points_m, dtype=np.float64).reshape(-1, 2)
+                 / float(scene_scale) + float(offset))
+    n = len(pts_scene)
+    if n == 0 or pack.sample_mask.shape[1] == 0:
+        return 0.0
+    u = (np.linspace(0.0, 1.0, n) if params is None
+         else np.asarray(params, dtype=np.float64).reshape(-1))
+    worst = 0.0
+    for sample in range(pack.sample_mask.shape[0]):
+        smask = pack.sample_mask[sample].detach().cpu().numpy()
+        if not smask.any():
+            continue
+        sample_u = pack.sample_u[sample].detach().cpu().numpy()
+        face = pack.face_mask[sample].detach().cpu().numpy()
+        A = pack.sample_A[sample].detach().cpu().numpy()
+        b = pack.sample_b[sample].detach().cpu().numpy()
+        owners = np.flatnonzero(smask)
+        nearest = owners[np.argmin(np.abs(sample_u[owners][None, :] - u[:, None]),
+                                   axis=1)]
+        for point, l in zip(pts_scene, nearest):
+            faces = face[l]
+            if not faces.any():
+                continue
+            g = A[l][faces] @ point - b[l][faces]
             worst = max(worst, float(np.max(g)))
     return worst * float(scene_scale)
 

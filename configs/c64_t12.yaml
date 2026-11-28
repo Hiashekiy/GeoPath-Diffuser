@@ -32,11 +32,15 @@ sampling:
   # instead of the mid-schedule default, so CPCG guides 11 of 12 steps.
   geometry_forward: 1
   mid_forward_fraction: 0.5          # ignored while geometry_forward is set
+  # uniform-arc-length constraint samples (CPCG + QP share this frozen pack)
+  constraint_points: 256
+  arc_length_lookup_points: 1024
 
 clean_guidance:
   enabled: true
-  step_size: 1.0
-  max_delta_m: 0.5
+  # real gradient step (scene units): J = 1/(2M) sum relu(g)^2, so the step is
+  # NOT re-normalised to a fixed metre offset any more - re-scan if M changes
+  step_size: 50.0
   backtrack_factors: [1.0, 0.5, 0.25, 0.125, 0.0625]
   margin_scene: 0.0
 

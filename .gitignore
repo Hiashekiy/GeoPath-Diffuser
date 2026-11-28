@@ -47,3 +47,7 @@ _scratch_*
 
 # regenerable per-sample prediction figures (5.9 MB of PNGs)
 outputs/figures/predictions/
+
+# --- bulky local run artifacts (kept out of git) ---------------------------
+outputs/reports/full_test_*.json
+outputs/reports/train_history_*.json

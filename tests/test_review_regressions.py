@@ -451,12 +451,15 @@ def test_failed_search_is_not_a_path(pipeline, sample, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# P1-5 (CPCG variant: no accept/reject gate, the trust region does the work)
+# P1-5 (CPCG variant: the step IS the gradient step, backtracking shrinks it)
 # --------------------------------------------------------------------------- #
-def test_trust_region_limits_the_guidance_step():
+def test_guidance_step_is_the_raw_gradient_step():
+    """No |delta|_max re-normalisation: the move is alpha * step_size * |grad|."""
     from gp_diffuser.diffusion.clean_guidance import clean_prediction_guidance
     from gp_diffuser.models.boundary import BoundaryDecoder
-    from gp_diffuser.safety.local_regions import box_cell_faces, pack_from_tables
+    from gp_diffuser.safety.bspline_sample_constraints import \
+        build_sampled_constraint_pack_from_tables
+    from gp_diffuser.safety.local_regions import box_cell_faces
     from gp_diffuser.trajectory.bspline import BSplineCodec
 
     codec = BSplineCodec(degree=3, num_controls=32, curve_points=128)
@@ -466,16 +469,22 @@ def test_trust_region_limits_the_guidance_step():
              "cell_mask": np.ones(32, dtype=bool),
              "cell_is_box": np.ones(32, dtype=bool),
              "anchors": np.linspace(0.0, 1.0, 32)}
-    pack = pack_from_tables(codec, [table])
+    ref = torch.zeros(1, 32, 2)
+    ref[0, :, 0] = torch.linspace(-0.8, 0.8, 32)
+    pack = build_sampled_constraint_pack_from_tables(
+        codec, [table], ref, constraint_points=64, arc_length_lookup_points=256)
     decoder = BoundaryDecoder(dtype=torch.float32)
     start_goal = torch.tensor([[[-0.9, -0.9], [0.9, 0.9]]])
     q = torch.zeros(1, 32, 2)
     q[0, 8:16] = torch.tensor([1.45, 0.0])
     q = decoder(q, start_goal)
-    limit = 0.005
-    guided, _ = clean_prediction_guidance(q, pack, decoder, start_goal,
-                                          step_size=10.0, max_delta_scene=limit)
-    assert float((guided - q).norm(dim=-1).max()) <= limit + 1e-6
+    step_size = 10.0
+    guided, stats = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                              step_size=step_size)
+    moved = float((guided - q).norm(dim=-1).max())
+    assert moved > 0.0
+    assert moved <= step_size * float(stats["grad_norm"][0]) + 1e-6, \
+        "the displacement must not be re-scaled to a fixed length"
 
 
 # --------------------------------------------------------------------------- #

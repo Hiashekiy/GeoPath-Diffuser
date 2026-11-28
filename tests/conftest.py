@@ -20,7 +20,7 @@ def project_root() -> str:
 @pytest.fixture(scope="session")
 def cfg():
     from gp_diffuser.config import load_config
-    config = load_config(os.path.join(PROJECT_ROOT, "configs", "default.yaml"))
+    config = load_config(os.path.join(PROJECT_ROOT, "configs", "base.yaml"))
     config["dataset"]["train_size"] = 2
     config["dataset"]["val_size"] = 1
     config["dataset"]["test_size"] = 2

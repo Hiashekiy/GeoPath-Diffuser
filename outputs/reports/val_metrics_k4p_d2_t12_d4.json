@@ -1,0 +1,22 @@
+{
+  "split": "val",
+  "batches": 8,
+  "use_safety": true,
+  "mean": {
+    "loss": 0.077179747633636,
+    "loss_u": 0.0,
+    "loss_c": 0.012044463190250099,
+    "loss_align": 0.012258019938599318,
+    "loss_boundary": 0.0006375610500981566,
+    "loss_smooth": 0.05758108850568533,
+    "loss_curve": 0.010032274294644594,
+    "loss_safe": 0.07644861959852278,
+    "loss_safe_max": 0.38292597606778145,
+    "loss_safe_u": 0.20760301128029823,
+    "corridor_pieces": 2476.5,
+    "corridor_samples": 15.875,
+    "safety_gate_mean": 0.1579270288348198,
+    "timestep_mean": 5.8671875,
+    "batch": 16.0
+  }
+}

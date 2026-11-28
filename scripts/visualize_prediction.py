@@ -55,17 +55,27 @@ def _px(pts, grid):
 
 
 def _corridor_mask(pack, grid):
-    """Rasterise the feasible set of every masked half-space cell (scene coords)."""
+    """Rasterise the feasible set of every masked half-space cell (scene coords).
+
+    Works with the inference sample pack (one cell per uniform-arc-length sample
+    point) and with the historical piece pack.
+    """
     idx = np.arange(grid)
     scene = (idx + 0.5) / (grid / 2.0) - 1.0
     gx, gy = np.meshgrid(scene, scene)          # rows = y, cols = x
     mask = np.zeros((grid, grid), dtype=bool)
     if pack is None:
         return mask
-    A = _np(pack.piece_A)[0]                    # [P,F,2]
-    b = _np(pack.piece_b)[0]                    # [P,F]
-    keep = _np(pack.piece_mask)[0] > 0
-    faces = _np(pack.face_mask)[0] > 0          # [P,F] active half-spaces
+    if hasattr(pack, "sample_A"):
+        A = _np(pack.sample_A)[0]               # [M,F,2]
+        b = _np(pack.sample_b)[0]               # [M,F]
+        keep = _np(pack.sample_mask)[0] > 0
+        faces = _np(pack.face_mask)[0] > 0      # [M,F] active half-spaces
+    else:
+        A = _np(pack.piece_A)[0]                # [P,F,2]
+        b = _np(pack.piece_b)[0]                # [P,F]
+        keep = _np(pack.piece_mask)[0] > 0
+        faces = _np(pack.face_mask)[0] > 0      # [P,F] active half-spaces
     for p in np.nonzero(keep)[0]:
         act = faces[p]
         if not act.any():

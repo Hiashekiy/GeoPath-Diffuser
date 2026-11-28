@@ -1,0 +1,30 @@
+{
+  "device": "cpu",
+  "samples": 2,
+  "steps": 8,
+  "timesteps": [
+    0,
+    142,
+    285,
+    428,
+    570,
+    713,
+    856,
+    999
+  ],
+  "modes": {
+    "map_only": {
+      "total_s_per_batch": 0.5098,
+      "total_ms_per_sample": 254.91,
+      "timing": {
+        "map_encode_s": 0.2868,
+        "initial_diffusion_s": 0.1956,
+        "final_projection_s": 0.0,
+        "final_validation_s": 0.0092,
+        "total_s": 0.4947
+      },
+      "trace_len": 0
+    }
+  },
+  "peak_gpu_memory_gb": null
+}

@@ -45,34 +45,42 @@ def _collision(occ_np: np.ndarray, curve_scene: np.ndarray) -> dict:
 
 
 def _regions_from_pack(pack, sample: int = 0):
-    """Corridor polygons ``[(region_id, vertices)]``, one per constrained region.
+    """Corridor polygons ``[(region_id, vertices)]`` of the regions in use.
 
-    Every piece of a region carries the SAME half-space set (the region is
-    convex), so one piece per ``piece_region_id`` reconstructs the cell exactly.
+    The inference pack holds ONE cell per uniform-arc-length sample point, so the
+    unique cells that own at least one sample are exactly the regions the
+    guidance and the QP constrain.
     """
     if pack is None:
         return []
-    ids = pack.piece_region_id[sample].detach().cpu().numpy()
-    pmask = pack.piece_mask[sample].detach().cpu().numpy()
-    A = pack.piece_A[sample].detach().cpu().numpy()
-    b = pack.piece_b[sample].detach().cpu().numpy()
-    fmask = pack.face_mask[sample].detach().cpu().numpy()
-    seen, out = set(), []
-    for p in range(len(ids)):
-        if not pmask[p]:
-            continue
-        rid = int(ids[p])
-        if rid in seen:
-            continue
-        seen.add(rid)
-        faces = fmask[p]
-        if not faces.any():
-            continue
-        poly = halfspaces_to_vertices(A[p][faces].astype(np.float64),
-                                      b[p][faces].astype(np.float64))
+    from gp_diffuser.safety.bspline_sample_constraints import region_polygons
+
+    out = []
+    for rid, A, b in region_polygons(pack, sample):
+        poly = halfspaces_to_vertices(np.asarray(A, dtype=np.float64),
+                                      np.asarray(b, dtype=np.float64))
         if poly is not None and len(poly) >= 3:
             out.append((rid, poly))
     return out
+
+
+def _samples_from_pack(pack, controls, sample: int = 0):
+    """``(points_scene [M,2], region_id [M], violation [M])`` of the pack."""
+    if pack is None:
+        return None
+    import torch
+
+    from gp_diffuser.diffusion.clean_guidance import sample_constraint_values
+    from gp_diffuser.safety.bspline_sample_constraints import sampled_points
+
+    q = controls[0:1] if controls.dim() == 3 else controls[None]
+    q = q.detach().float().cpu()
+    pack_cpu = pack.to(device="cpu", dtype=torch.float32)
+    points = sampled_points(pack_cpu, q, sample=sample)
+    _, raw, valid = sample_constraint_values(q, pack_cpu)
+    violation = (torch.relu(raw) * valid).amax(dim=-1)[sample].cpu().numpy()
+    return (points, pack_cpu.region_id[sample].cpu().numpy(),
+            pack_cpu.sample_mask[sample].cpu().numpy(), violation)
 
 
 def _cells_near(polys_m, curves_m, radius_m: float):
@@ -93,7 +101,7 @@ def _cells_near(polys_m, curves_m, radius_m: float):
 
 
 def _panel(ax, occ_np, res_m, gt_m, start_m, goal_m, *, ellipses_m, regions_m,
-           search_m, curves, title, legend=False):
+           search_m, curves, title, legend=False, samples=None):
     extent = occ_np.shape[-1] * res_m
     ax.imshow(occ_np, origin="lower", cmap="Greys", alpha=0.85,
               extent=(0.0, extent, 0.0, extent))
@@ -110,6 +118,23 @@ def _panel(ax, occ_np, res_m, gt_m, start_m, goal_m, *, ellipses_m, regions_m,
     if search_m is not None:
         ax.plot(search_m[:, 0], search_m[:, 1], color="#ff7f0e", lw=1.4, ls="--")
     ax.plot(gt_m[:, 0], gt_m[:, 1], color="#1f77b4", lw=1.6, alpha=0.85)
+
+    if samples is not None:
+        pts_m, region_id, sample_mask, violation = samples
+        keep = sample_mask.astype(bool)
+        ax.plot(pts_m[keep, 0], pts_m[keep, 1], ".", color="#8c564b", ms=2.0,
+                alpha=0.75, zorder=5)
+        bad = keep & (violation > 0.0)
+        if bad.any():
+            ax.plot(pts_m[bad, 0], pts_m[bad, 1], "o", color="#e377c2", ms=4.6,
+                    mfc="none", mew=1.0, zorder=7)
+        # region id of a few samples, so the ONE-cell-per-sample rule is readable
+        stride = max(1, len(region_id) // 12)
+        for i in range(0, len(region_id), stride):
+            if not keep[i]:
+                continue
+            ax.annotate(str(int(region_id[i])), (pts_m[i, 0], pts_m[i, 1]),
+                        fontsize=4.5, color="#444444", zorder=8)
 
     for xy, style in curves:
         ax.plot(xy[:, 0], xy[:, 1], **style)
@@ -203,6 +228,11 @@ def main() -> int:
             ellipses_m.append(transform.to_meters(local @ rot.T + np.array([cx, cy])))
     regions_m = [(rid, transform.to_meters(poly))
                  for rid, poly in _regions_from_pack(out.get("pack"))]
+    samples_final = _samples_from_pack(out.get("pack"), out["controls"])
+    if samples_final is not None:
+        pts_scene, region_id, sample_mask, violation = samples_final
+        samples_final = (transform.to_meters(pts_scene), region_id, sample_mask,
+                         violation)
 
     trace = [c for c in out["steps_trace"] if c.get("x0_scene") is not None]
     # the safety geometry (search path / ellipses / corridor) only EXISTS from the
@@ -235,6 +265,12 @@ def main() -> int:
             "corridor_violation_m": float(corridor_violation_m(
                 curve_m, out.get("pack"), float(transform.scale),
                 offset=transform.offset)),
+            "sampled_violation_before_m": (None if not c.get("guidance") else
+                                           float(c["guidance"]["max_violation_before"])
+                                           * float(transform.scale)),
+            "sampled_violation_after_m": (None if not c.get("guidance") else
+                                          float(c["guidance"]["max_violation_after"])
+                                          * float(transform.scale)),
             "length_m": float(np.linalg.norm(np.diff(curve_m, axis=0), axis=1).sum()),
             "guidance": c.get("guidance"),
             "guided_collision_fraction": (
@@ -254,6 +290,18 @@ def main() -> int:
         "qp_iterations": out.get("final_qp_iterations"),
         "qp_certified": bool(out.get("corridor_certified_all", False)),
         "qp_correction_m": float(out.get("final_projection_correction_m", 0.0)),
+        # sampled-constraint semantics (NOT a continuous certificate)
+        "sampled_constraint_max_violation_scene": float(
+            out.get("sampled_constraint_max_violation", 0.0)),
+        "sampled_constraint_max_violation_m": float(
+            out.get("sampled_constraint_max_violation", 0.0)) * float(transform.scale),
+        "sampled_constraints_satisfied": bool(
+            out.get("sampled_constraints_satisfied", False)),
+        "sampled_region_coverage_ok": bool(
+            out.get("sampled_region_coverage_ok", False)),
+        "num_constraint_samples": int(out.get("num_constraint_samples", 0)),
+        "num_constraint_rows": int(out.get("num_constraint_rows", 0)),
+        "dense_collision_free": bool(fin_coll["fraction"] <= 1e-9),
         "valid": bool(out["valid"]),
     }
 
@@ -309,15 +357,19 @@ def main() -> int:
     final_cells = _cells_near(regions_m, [final_m], radius_m=3.0)
     _panel(ax, occ_np, res_m, gt_m, start_m, goal_m,
            ellipses_m=ellipses_m, regions_m=final_cells, search_m=search_m,
+           samples=samples_final,
            curves=[(final_m, dict(color="#6a3d9a", lw=2.6, label="final")),
                    (_to_m(transform,
                           out["controls_unprojected"][0].detach().cpu().numpy()),
                     dict(color="#ff7f0e", lw=1.3, ls=":", label="pre-QP"))],
            title=title)
     ax.text(0.02, 0.02,
-            "certified=%s\nvalid=%s\nmin clearance %.2f m"
+            "certified=%s\nvalid=%s\nmin clearance %.2f m\n"
+            "sampled violation %.3f m (%d rows)"
             % (rows["final"]["qp_certified"], rows["final"]["valid"],
-               rows["final"]["min_clearance_m"]),
+               rows["final"]["min_clearance_m"],
+               rows["final"]["sampled_constraint_max_violation_m"],
+               rows["final"]["num_constraint_rows"]),
             transform=ax.transAxes, fontsize=6.5, va="bottom",
             bbox=dict(fc="white", alpha=0.85, lw=0))
 
@@ -325,7 +377,11 @@ def main() -> int:
                Line2D([], [], color="#ff7f0e", lw=1.4, ls="--", label="searched path"),
                Line2D([], [], color="#9467bd", lw=0.8, label="PathSafe ellipses"),
                Line2D([], [], color="#17becf", lw=6, alpha=0.3,
-                      label="convex corridor cells (near the curve)"),
+                      label="convex cells of the samples (near the curve)"),
+               Line2D([], [], color="#8c564b", marker=".", ls="", ms=5,
+                      label="constraint samples (id = their region)"),
+               Line2D([], [], color="#e377c2", marker="o", ls="", ms=6, mfc="none",
+                      label="violating samples"),
                Line2D([], [], color="#d62728", lw=2.0, label="x0_pred (clean)"),
                Line2D([], [], color="#2ca02c", lw=1.6, ls="--", label="x0_guided (CPCG)"),
                Line2D([], [], color="#6a3d9a", lw=2.6, label="final trajectory")]

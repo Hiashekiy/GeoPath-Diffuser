@@ -1,30 +1,30 @@
-"""Terminal convex QP projection of the clean controls into the frozen corridor.
+"""Terminal convex QP projection onto the sampled B-spline constraints.
 
-CPCG is soft guidance: it changes the reverse direction but certifies nothing.
-After the LAST reverse step the clean control polygon therefore gets one standard
-convex QP, solved per sample against the SAME frozen
-:class:`~gp_diffuser.safety.bspline_constraints.BSplineConstraintPack` the
-guidance used:
+CPCG is soft guidance: it changes the reverse direction but proves nothing.  After
+the LAST reverse step the clean control polygon therefore gets one standard convex
+QP, solved per sample against the SAME frozen
+:class:`~gp_diffuser.safety.bspline_sample_constraints.BSplineSampleConstraintPack`
+the guidance used:
 
     minimize    0.5 * || Q - Q_target ||_2^2
 
-    subject to  A[p,f] · E[p,r] · Q <= b[p,f]      for every valid (p, r, f)
+    subject to  a_{j(l),f} . N_l Q <= b_{j(l),f}     for every valid (l, f)
                 Q[0]   = start,   Q[C-1] = goal
                 (optional, when a heading is valid)
                     normal( Q_1 - Q_0 )     = 0,  forward( Q_1 - Q_0 )     >= 0
                     normal( Q_C-1 - Q_C-2 ) = 0,  forward( Q_C-1 - Q_C-2 ) >= 0
 
-The optimisation variable is ALWAYS the global B-spline control polygon ``Q
-[C,2]``; the four Bezier controls of a piece are ``E[p,r] Q``, i.e. linear
-functions of it, never independent variables.
+The optimisation variable is ALWAYS the global control polygon ``Q [C,2]``
+(``x = vec(Q) in R^{2C}``); a sample point ``P_l = N_l Q`` is a linear function of
+it, never an independent variable.  The OSQP row of ``(l, f)`` is
 
-Because the four Bezier controls of a piece are in the (convex) responsible
-region, the whole curve piece is: a successful QP is a CONTINUOUS certificate
-for the intervals the pack actually covers.  It says nothing about intervals the
-corridor never covered - that is what the independent dense collision validation
-in the sampler is for.
+    G[(l,f), 2k+d] = N_l[k] * a_{j(l),f,d},      h[(l,f)] = b_{j(l),f}
 
-Nothing here rebuilds a corridor, re-extracts a Bezier matrix or calls the ALM.
+so ``G @ vec(Q) <= h`` is exactly the pack's constraint set.
+
+A successful QP means the ``M`` SAMPLED points satisfy their own cells.  It is NOT
+a continuous certificate for the whole curve: that is what the independent dense
+collision validation in the sampler is for.
 """
 from __future__ import annotations
 
@@ -34,7 +34,8 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import torch
 
-__all__ = ["project_controls_to_corridor_qp", "corridor_constraint_rows"]
+__all__ = ["project_controls_to_corridor_qp", "sampled_constraint_rows",
+           "endpoint_violation"]
 
 # OSQP statuses that carry a usable solution
 _SOLVED = ("solved", "solved inaccurate")
@@ -46,33 +47,67 @@ def _as_numpy(torch_or_array, dtype=np.float64) -> np.ndarray:
     return np.asarray(torch_or_array, dtype=dtype)
 
 
-def corridor_constraint_rows(pack, sample: int
-                             ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """``(G [M,2C], h [M])`` for ``A E Q <= b`` of one sample, valid rows only.
+def sampled_constraint_rows(pack, sample: int
+                            ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """``(G [rows,2C], h [rows])`` for ``a_{j(l),f} N_l Q <= b_{j(l),f}``.
 
-    The row of ``(p, r, f)`` is ``G[m, 2k+d] = E[p,r,k] * A[p,f,d]`` and
-    ``h[m] = b[p,f]``, i.e. exactly ``A[p,f] . (E[p,r] Q) <= b[p,f]`` flattened
-    into the control-space ordering ``(k, d)``.  Padded pieces and padded faces
-    are never emitted.
+    Only the valid samples and their valid faces are emitted; padded samples and
+    padded faces never become rows.
     """
-    piece_mask = _as_numpy(pack.piece_mask[sample], bool)
-    face_mask = _as_numpy(pack.face_mask[sample], bool)
-    if not piece_mask.any():
+    if pack is None:
         return None, None
-    pieces, faces = np.nonzero(piece_mask[:, None] & face_mask)
-    if len(pieces) == 0:
+    sample_mask = _as_numpy(pack.sample_mask[sample], bool)          # [M]
+    face_mask = _as_numpy(pack.face_mask[sample], bool)              # [M,F]
+    if not sample_mask.any() or not face_mask.any():
+        return None, None
+    rows, faces = np.nonzero(sample_mask[:, None] & face_mask)
+    if len(rows) == 0:
         return None, None
 
-    E = _as_numpy(pack.extraction[sample])            # [P,4,C]
-    A = _as_numpy(pack.piece_A[sample])               # [P,F,2]
-    b = _as_numpy(pack.piece_b[sample])               # [P,F]
-    C = int(E.shape[-1])
+    N = _as_numpy(pack.basis[sample])                # [M,C]
+    A = _as_numpy(pack.sample_A[sample])             # [M,F,2]
+    b = _as_numpy(pack.sample_b[sample])             # [M,F]
+    C = int(N.shape[1])
 
-    E_sel = np.concatenate([E[pieces, r] for r in range(4)], axis=0)   # [4M,C]
-    A_sel = np.tile(A[pieces, faces], (4, 1))                          # [4M,2]
-    h_sel = np.tile(b[pieces, faces], 4)                               # [4M]
-    G = (E_sel[:, :, None] * A_sel[:, None, :]).reshape(-1, 2 * C)
-    return G, h_sel
+    N_sel = N[rows]                                  # [rows,C]
+    A_sel = A[rows, faces]                           # [rows,2]
+    h = b[rows, faces]                               # [rows]
+    G = (N_sel[:, :, None] * A_sel[:, None, :]).reshape(-1, 2 * C)
+    return G, h
+
+
+def endpoint_violation(pack, sample: int, start: np.ndarray, goal: np.ndarray
+                       ) -> Dict[str, float]:
+    """Half-space excess of start / goal against THEIR OWN sample's region.
+
+    Only the region of the FIRST valid sample is allowed to judge ``start`` and
+    only the region of the LAST valid sample may judge ``goal``.  Testing the
+    endpoints against every region would report violations from cells the
+    endpoints were never assigned to.
+    """
+    out = {"start": float("nan"), "goal": float("nan"), "max": float("nan")}
+    if pack is None:
+        return out
+    smask = _as_numpy(pack.sample_mask[sample], bool)
+    valid = np.flatnonzero(smask)
+    if valid.size == 0:
+        return out
+    fmask = _as_numpy(pack.face_mask[sample], bool)
+    A = _as_numpy(pack.sample_A[sample])
+    b = _as_numpy(pack.sample_b[sample])
+
+    def _one(index: int, point: np.ndarray) -> float:
+        faces = fmask[index]
+        if not faces.any():
+            return float("nan")
+        return float(np.max(A[index][faces] @ np.asarray(point, dtype=np.float64)
+                            - b[index][faces]))
+
+    out["start"] = _one(int(valid[0]), start)
+    out["goal"] = _one(int(valid[-1]), goal)
+    values = [v for v in (out["start"], out["goal"]) if np.isfinite(v)]
+    out["max"] = float(max(values)) if values else float("nan")
+    return out
 
 
 def _tangent_rows(C: int, start_dir: np.ndarray, goal_dir: np.ndarray):
@@ -108,7 +143,8 @@ def _tangent_rows(C: int, start_dir: np.ndarray, goal_dir: np.ndarray):
 def _solve_one(target: np.ndarray, G: Optional[np.ndarray], h: Optional[np.ndarray],
                start: np.ndarray, goal: np.ndarray,
                start_dir: Optional[np.ndarray], goal_dir: Optional[np.ndarray],
-               cfg: dict) -> Tuple[np.ndarray, Dict]:
+               cfg: dict, endpoint_info: Optional[Dict[str, float]] = None
+               ) -> Tuple[np.ndarray, Dict]:
     """One convex QP; returns the (possibly snapped) controls and diagnostics."""
     import osqp
     import scipy.sparse as sp
@@ -116,12 +152,12 @@ def _solve_one(target: np.ndarray, G: Optional[np.ndarray], h: Optional[np.ndarr
     C = int(target.shape[0])
     n_var = 2 * C
     blocks, lower, upper = [], [], []
-    n_corridor = 0
+    n_rows = 0
     if G is not None and h is not None and len(h):
         blocks.append(G)
         lower.append(np.full(len(h), -np.inf))
         upper.append(h)
-        n_corridor = int(len(h))
+        n_rows = int(len(h))
 
     A_eq = np.zeros((4, n_var))
     A_eq[0, 0] = 1.0
@@ -151,17 +187,13 @@ def _solve_one(target: np.ndarray, G: Optional[np.ndarray], h: Optional[np.ndarr
     q_vec = -np.asarray(target, dtype=np.float64).reshape(-1)
 
     info: Dict = {"status": "not_run", "iterations": 0, "solve_time_s": 0.0,
-                  "num_corridor_rows": n_corridor, "certified": False}
-    # Pre-check: the endpoint equalities can only be met inside the corridor if
-    # the endpoints themselves are in it.  Reported explicitly so an infeasible
-    # QP says WHETHER the corridor covered the endpoints (spec 5.4).
-    endpoint_violation = float("nan")
-    if G is not None and len(h):
-        snapped = np.array(target, dtype=np.float64).reshape(-1, 2).copy()
-        snapped[0] = start
-        snapped[C - 1] = goal
-        endpoint_violation = float(np.max(G @ snapped.reshape(-1) - h))
-    info["endpoint_violation_scene"] = endpoint_violation
+                  "num_constraint_rows": n_rows, "certified": False,
+                  "sampled_constraints_satisfied": False}
+    ep = endpoint_info or {}
+    info["endpoint_violation_start_scene"] = ep.get("start", float("nan"))
+    info["endpoint_violation_goal_scene"] = ep.get("goal", float("nan"))
+    info["endpoint_violation_scene"] = ep.get("max", float("nan"))
+
     t0 = time.perf_counter()
     setup_kwargs = dict(
         P=P, q=q_vec, A=A_osqp, l=l_vec, u=u_vec, verbose=False,
@@ -195,10 +227,11 @@ def _solve_one(target: np.ndarray, G: Optional[np.ndarray], h: Optional[np.ndarr
         info["certified"] = False
         if info["status"] not in _SOLVED:
             tol = float(cfg.get("feasibility_tol_scene", 1e-4))
+            ep_max = info.get("endpoint_violation_scene", float("nan"))
             info["failure_reason"] = (
-                "endpoints_outside_corridor"
-                if np.isfinite(endpoint_violation) and endpoint_violation > tol
-                else "corridor_infeasible")
+                "endpoints_outside_their_region"
+                if np.isfinite(ep_max) and ep_max > tol
+                else "sampled_constraints_infeasible")
         return np.array(target, dtype=np.float64, copy=True), info
 
     controls = x.reshape(C, 2)
@@ -207,16 +240,15 @@ def _solve_one(target: np.ndarray, G: Optional[np.ndarray], h: Optional[np.ndarr
     # the polygon that is actually returned
     controls[0] = start
     controls[C - 1] = goal
-    if G is not None and len(h):
-        violation = float(np.max(G @ controls.reshape(-1) - h))
-    else:
-        violation = 0.0
+    violation = float(np.max(G @ controls.reshape(-1) - h)) \
+        if (G is not None and len(h)) else 0.0
     info["max_violation_scene"] = violation
-    info["certified"] = bool(n_corridor > 0
+    info["certified"] = bool(n_rows > 0
                              and violation <= float(cfg.get("feasibility_tol_scene",
                                                             1e-4)))
+    info["sampled_constraints_satisfied"] = info["certified"]
     if not info["certified"]:
-        info["failure_reason"] = ("no_corridor_constraints" if n_corridor == 0
+        info["failure_reason"] = ("no_constraint_rows" if n_rows == 0
                                   else "residual_violation_after_projection")
     return controls, info
 
@@ -233,31 +265,40 @@ def project_controls_to_corridor_qp(
 
     ``info`` carries per-sample ``status`` / ``iterations`` / ``solve_time_s`` /
     ``max_violation_scene`` / ``certified`` plus the aggregate keys the sampler
-    and the report use.  A sample without any corridor constraint is returned
+    and the report use.  A sample without any sampled constraint is returned
     UNCHANGED with ``certified == False``: an empty pack is not a certificate.
     """
     cfg = dict(solver_cfg or {})
     scene_to_meter = float(cfg.get("scene_to_meter", 1.0))
     B, C = int(q_target.shape[0]), int(q_target.shape[1])
+    expected = int(getattr(pack, "num_controls", C)) if pack is not None else C
+    if expected != C:                                       # pragma: no cover
+        raise ValueError("pack controls %d != target controls %d" % (expected, C))
 
     projected = q_target.detach().clone()
     per_sample: list = []
     if pack is None:
         per_sample = [{"status": "no_constraints", "iterations": 0,
-                       "solve_time_s": 0.0, "num_corridor_rows": 0,
+                       "solve_time_s": 0.0, "num_constraint_rows": 0,
                        "max_violation_scene": float("nan"),
-                       "correction_m": 0.0, "certified": False}] * B
+                       "correction_m": 0.0, "certified": False,
+                       "sampled_constraints_satisfied": False}] * B
     else:
         for b in range(B):
             target = _as_numpy(q_target[b])
             start = _as_numpy(start_goal[b, 0])
             goal = _as_numpy(start_goal[b, 1])
-            G, h = corridor_constraint_rows(pack, b)
+            G, h = sampled_constraint_rows(pack, b)
+            ep = endpoint_violation(pack, b, start, goal)
             if G is None:
                 per_sample.append({"status": "no_constraints", "iterations": 0,
-                                   "solve_time_s": 0.0, "num_corridor_rows": 0,
+                                   "solve_time_s": 0.0, "num_constraint_rows": 0,
                                    "max_violation_scene": float("nan"),
-                                   "correction_m": 0.0, "certified": False})
+                                   "correction_m": 0.0, "certified": False,
+                                   "sampled_constraints_satisfied": False,
+                                   "endpoint_violation_start_scene": ep["start"],
+                                   "endpoint_violation_goal_scene": ep["goal"],
+                                   "endpoint_violation_scene": ep["max"]})
                 continue
             start_dir = goal_dir = None
             if heading is not None:
@@ -275,7 +316,7 @@ def project_controls_to_corridor_qp(
                 # an invalid end simply gets no tangent rows (never a silent drop
                 # of a VALID heading)
             controls, info = _solve_one(target, G, h, start, goal,
-                                        start_dir, goal_dir, cfg)
+                                        start_dir, goal_dir, cfg, ep)
             info["correction_m"] = float(
                 np.abs(controls - target).max() * scene_to_meter)
             per_sample.append(info)
@@ -301,8 +342,10 @@ def project_controls_to_corridor_qp(
         "solve_time_s": _col("solve_time_s", 0.0),
         "max_violation_scene": _col("max_violation_scene", float("nan")),
         "correction_m": _col("correction_m", 0.0),
-        "num_corridor_rows": _col("num_corridor_rows", 0),
+        "num_constraint_rows": _col("num_constraint_rows", 0),
+        "endpoint_violation_scene": _col("endpoint_violation_scene", float("nan")),
         "certified": certified.detach().cpu(),
+        "sampled_constraints_satisfied": certified.detach().cpu(),
         "all_certified": bool(certified.all().item()),
         "total_solve_time_s": float(sum(item.get("solve_time_s", 0.0)
                                         for item in per_sample)),

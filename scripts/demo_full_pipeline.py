@@ -111,14 +111,16 @@ def run_scene(sampler, guidance, transform, dataset, index, steps, seed) -> dict
         "ellipse_axis_m_min_max": [float(axes_m.min()), float(axes_m.max())],
         "local_convex_cells": int(raw["local_cells"][0].item()),
         "corridor_spans": (list(raw["corridor_info"].get("spans") or [])[:6]),
-        "constraint_pieces": (None if pack is None
-                              else int(pack.num_pieces[0].item())),
+        "constraint_samples": (None if pack is None
+                               else int(pack.basis.shape[1])),
         "constraint_inequalities": (None if pack is None
-                                    else int(pack.num_constraints)),
-        "constraint_pieces_local": (None if pack_local is None
-                                    else int(pack_local.num_pieces[0].item())),
+                                    else int(pack.num_constraint_rows)),
+        "constraint_samples_local": (None if pack_local is None
+                                     else int(pack_local.sample_mask.sum())),
         "constraint_inequalities_local": (None if pack_local is None
-                                          else int(pack_local.num_constraints)),
+                                          else int(pack_local.num_constraint_rows)),
+        "constraint_pack_warnings": ([] if pack is None
+                                     else list(pack.summary()["warnings"])),
         "timing_s": {k: round(v, 3) for k, v in raw["timing"].items()},
         "search_stats": search_stats[0],
     }

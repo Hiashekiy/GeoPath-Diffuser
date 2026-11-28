@@ -110,6 +110,69 @@ def test_frozen_pack_and_safety_memory_are_reused(pipeline, cfg, monkeypatch):
         "safety memory must be built once"
 
 
+def test_one_frozen_sample_pack_is_shared_by_cpcg_and_qp(pipeline, cfg, monkeypatch):
+    """The arc-length sampling / region assignment are built ONCE and reused."""
+    import torch
+
+    item = _scene_with_cells(cfg)
+    occ, sdf, sg, hd, hv = _batch(item)
+    builds = []
+    original_build = sampler_mod.build_sampled_constraint_pack
+    original_guidance = sampler_mod.clean_prediction_guidance
+    original_qp = qp_mod.project_controls_to_corridor_qp
+    guide_packs, qp_packs = [], []
+
+    def spy_build(*args, **kwargs):
+        pack = original_build(*args, **kwargs)
+        builds.append(pack)
+        return pack
+
+    def spy_guidance(q0, pack, *args, **kwargs):
+        guide_packs.append(id(pack))
+        return original_guidance(q0, pack, *args, **kwargs)
+
+    def spy_qp(q_target, pack, *args, **kwargs):
+        qp_packs.append(id(pack))
+        return original_qp(q_target, pack, *args, **kwargs)
+
+    monkeypatch.setattr(sampler_mod, "build_sampled_constraint_pack", spy_build)
+    monkeypatch.setattr(sampler_mod, "clean_prediction_guidance", spy_guidance)
+    monkeypatch.setattr(qp_mod, "project_controls_to_corridor_qp", spy_qp)
+    out = pipeline["sampler"].sample(occ, sdf, sg, heading=hd, heading_valid=hv,
+                                     steps=10, seed=0)
+    pack = out["pack"]
+    assert pack is not None, "scene 2 must produce a sample pack"
+    assert len(builds) == 1, "the sample pack must be built exactly once"
+    assert len(qp_packs) == 1, "the QP must run exactly once"
+    assert set(guide_packs) == {id(pack)} and qp_packs == [id(pack)], \
+        "CPCG and the QP must consume the SAME frozen pack"
+    # frozen sampling: no re-arc-length per denoising step
+    u = pack.sample_u[0]
+    assert torch.all(u[1:] > u[:-1]) and float(u[0]) == 0.0 and float(u[-1]) == 1.0
+
+
+def test_sample_pack_semantics_are_reported(pipeline, cfg):
+    item = _scene_with_cells(cfg)
+    occ, sdf, sg, hd, hv = _batch(item)
+    out = pipeline["sampler"].sample(occ, sdf, sg, heading=hd, heading_valid=hv,
+                                     steps=8, seed=0)
+    pack = out["pack"]
+    points = int(pipeline["sampler"].cfg["sampling"]["constraint_points"])
+    assert pack.basis.shape[1] == points
+    assert pack.num_controls == int(pipeline["codec"].num_controls)
+    for key in ("sampled_constraint_max_violation", "sampled_constraints_satisfied",
+                "sampled_region_coverage_ok", "num_constraint_samples",
+                "num_constraint_rows", "dense_collision_free"):
+        assert key in out, "the sampled-constraint metrics must be reported"
+    assert int(out["num_constraint_samples"]) == points
+    assert int(out["num_constraint_rows"]) == int(
+        (pack.sample_mask[:, :, None] & pack.face_mask).sum())
+    assert isinstance(out["sampled_constraints_satisfied"], bool)
+    # the QP must have been solved on rows built from basis x halfspace
+    rows = out["final_qp"]["num_constraint_rows"][0]
+    assert rows == out["num_constraint_rows"] or not out["final_qp_status"]
+
+
 def test_cpcg_adds_no_network_forward(pipeline, cfg, monkeypatch):
     item = _scene_with_cells(cfg)
     occ, sdf, sg, hd, hv = _batch(item)
@@ -296,8 +359,11 @@ def test_uncertified_projection_never_rewrites_the_trajectory(pipeline, cfg,
         return q.clone(), {"per_sample": [], "solver": "osqp",
                            "status": ["primal infeasible"], "iterations": [0],
                            "solve_time_s": [0.0], "max_violation_scene": [float("nan")],
-                           "correction_m": [0.0], "num_corridor_rows": [0],
+                           "correction_m": [0.0], "num_constraint_rows": [0],
+                           "endpoint_violation_scene": [float("nan")],
                            "certified": torch.zeros(q.shape[0], dtype=torch.bool),
+                           "sampled_constraints_satisfied":
+                               torch.zeros(q.shape[0], dtype=torch.bool),
                            "all_certified": False, "total_solve_time_s": 0.0}
 
     monkeypatch.setattr(qp_mod, "project_controls_to_corridor_qp", failing)
@@ -368,26 +434,31 @@ def test_steps_are_configurable(pipeline, sample):
         assert out["frames"]["num_forwards"] == steps
 
 
-def test_default_is_8_reverse_steps(pipeline, sample: object):
-    """The repo's inference default is 8 EXECUTED steps (no retraining involved).
+def test_default_runs_the_whole_trained_table(pipeline, sample: object):
+    """The default executes the FULL noise table (t12 -> 12 forwards).
 
-    Eight steps are a uniform subsampling of the trained 1000-entry noise table,
-    so the same weights are used and the reverse loop runs 8 forwards.  Running
-    the whole table stays possible but is never the default.
+    ``pick_times`` is a DDIM subsampler that only applies when
+    ``steps < train_diffusion_steps``; at the shipped default the whole trained
+    schedule runs, so the forward count equals ``train_diffusion_steps``.
     """
     from gp_diffuser.diffusion.sampler_conditional_dit import pick_times
 
-    assert len(pick_times(1000, 8)) == 8
-    assert pick_times(1000, 8)[0] == 0 and pick_times(1000, 8)[-1] == 999
-    assert len(pick_times(1000, 50)) == 50
-    assert pick_times(1000, 1000) is None, "the full table is opt-in only"
+    sampler = pipeline["sampler"]
+    table = int(pipeline["schedule"].num_timesteps)
+    assert int(sampler.cfg["diffusion"]["train_diffusion_steps"]) == table
+    assert int(sampler.cfg["sampling"]["steps"]) == table, \
+        "the default must execute the whole trained table"
+
+    # fewer steps than the table -> uniform DDIM subsampling of it
+    sub = pick_times(table, max(2, table // 2))
+    assert sub is not None and len(sub) <= table
+    assert sub[0] == 0 and sub[-1] == table - 1
+    assert pick_times(table, table) is None, "the whole table is the default path"
 
     item, _ = sample
     occ, sdf, sg, hd, hv = _batch(item)
-    sampler = pipeline["sampler"]
-    assert int(sampler.cfg["sampling"]["steps"]) == 8
     out = sampler.sample(occ, sdf, sg, heading=hd, heading_valid=hv, seed=0)
-    assert out["frames"]["num_forwards"] == 8
+    assert out["frames"]["num_forwards"] == table
 
 
 def test_safety_geometry_is_built_at_the_configured_forward(pipeline, sample: object):

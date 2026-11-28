@@ -41,15 +41,32 @@ def clip_polygon(poly, normal, offset):
 
 
 def piece_polygons(pack, sample=0):
-    A = pack.piece_A[sample].detach().cpu().numpy()
-    b = pack.piece_b[sample].detach().cpu().numpy()
-    face = pack.face_mask[sample].detach().cpu().numpy()
-    piece = pack.piece_mask[sample].detach().cpu().numpy()
+    """Feasible polygons of the pack's cells (sample pack or historical piece pack).
+
+    The inference pack holds ONE cell per uniform-arc-length sample point, so the
+    polygons returned are the unique cells that actually own a sample.
+    """
+    A_all = (pack.sample_A if hasattr(pack, "sample_A") else pack.piece_A)
+    b_all = (pack.sample_b if hasattr(pack, "sample_b") else pack.piece_b)
+    face_all = pack.face_mask
+    if hasattr(pack, "sample_A"):
+        keep_all = pack.sample_mask
+    else:
+        keep_all = pack.piece_mask
+    A = A_all[sample].detach().cpu().numpy()
+    b = b_all[sample].detach().cpu().numpy()
+    face = face_all[sample].detach().cpu().numpy()
+    piece = keep_all[sample].detach().cpu().numpy()
     box = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
-    out = []
+    out, seen = [], set()
     for p in range(len(piece)):
         if not piece[p] or not face[p].any():
             continue
+        key = (tuple(np.round(A[p][face[p]], 9).ravel()),
+               tuple(np.round(b[p][face[p]], 9).ravel()))
+        if key in seen:                          # one polygon per CELL
+            continue
+        seen.add(key)
         poly = box
         for f in range(A.shape[1]):
             if not face[p, f]:

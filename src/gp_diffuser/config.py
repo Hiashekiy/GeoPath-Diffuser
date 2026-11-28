@@ -1,6 +1,6 @@
 """Config loading and path resolution.
 
-One YAML file (``configs/default.yaml``) carries every tunable; helpers here give
+One YAML file (``configs/base.yaml``) carries every tunable; helpers here give
 dotted access and a stable set of defaults so a partial config still runs.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, Dict
 import yaml
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "default.yaml")
+DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "base.yaml")
 
 
 def project_path(*parts: str) -> str:
@@ -21,7 +21,7 @@ def project_path(*parts: str) -> str:
 
 
 def load_config(path: str | None = None) -> Dict[str, Any]:
-    """Load a YAML config and fill in the defaults from ``configs/default.yaml``."""
+    """Load a YAML config and fill in the defaults from ``configs/base.yaml``."""
     base: Dict[str, Any] = {}
     if os.path.exists(DEFAULT_CONFIG):
         with open(DEFAULT_CONFIG, "r", encoding="utf-8") as fh:

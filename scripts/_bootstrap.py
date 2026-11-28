@@ -14,7 +14,7 @@ import argparse  # noqa: E402
 
 def base_parser(description: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--config", default=os.path.join(PROJECT_ROOT, "configs", "default.yaml"),
+    parser.add_argument("--config", default=os.path.join(PROJECT_ROOT, "configs", "base.yaml"),
                         help="YAML config (defaults are merged in)")
     parser.add_argument("--device", default="cpu", help="torch device, e.g. cpu or cuda")
     return parser

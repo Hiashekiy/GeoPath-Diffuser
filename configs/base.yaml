@@ -1,0 +1,237 @@
+# ===========================================================================
+# GeoPath-Diffuser - default configuration
+#
+# Sections mirror the design document
+# (docs/安全条件扩散轨迹规划方案_Conditional-DiT网络修正版.md):
+#   map_encoder / map_condition / diffusion / trajectory / guidance /
+#   safety_condition / corridor / clean_guidance / final_projection / sampling /
+#   training / dataset / dual_branch_training / evaluation
+#   (`alm` is a HISTORICAL block kept only for tests/test_alm.py)
+#
+# NOTE ON UNITS: the trajectory / B-spline / ALM state lives in normalised
+# `[-1, 1]^2` scene coordinates (the same convention as PathSafe
+# `world_to_grid` and TrajSafe `convex_region`).  Maps, SDF, LiDAR and the
+# PathSafe-EllipseNet input stay in metres.  `dataset.res_m * dataset.grid`
+# fixes the extent (0.25 m * 256 = 64 m).
+# ===========================================================================
+
+map_encoder:
+  source: "PathSafe-EllipseNet"
+  # resolved against references/PathSafe-Ellipse/checkpoints/v3_best.pt
+  checkpoint: "references/PathSafe-Ellipse/checkpoints/v3_best.pt"
+  freeze: true
+  eval_mode: true
+  occupancy_encoder: true
+  sdf_encoder: true
+  use_bottleneck: true               # Diffusion map condition = enc3 bottleneck
+  use_full_features_for_safety: true # PathSafe local queries use full feature
+  sdf_clip_m: 8.0                    # = PathSafe `data.d_clip`
+
+map_condition:
+  enabled: true
+  encoder_type: "dual_adapter_residual_fusion"   # occ/sdf adapter -> concat -> fusion
+  bottleneck_channels: 192           # enc3 channels for base=24
+  adapter_channels: 192              # per-modality adapter width (independent params)
+  fusion_channels: 384               # == adapter_channels * 2
+  projection_dim: 384                # == diffusion.hidden_dim
+  grid: 32                           # 256 / 8 -> 32x32 -> 1024 tokens
+  adapter_norm: "group_norm"
+  adapter_groups: 16
+  spatial_fusion:
+    type: "depthwise_pointwise_residual"
+    kernel_size: 3
+
+diffusion:
+  backbone: "conditional_dit"        # NEW network, not TrajSafe V5
+  variant: "DiT-S"
+  prediction_type: "x0"
+  hidden_dim: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4
+  dropout: 0.0
+  timestep_embedding: "sinusoidal_mlp"
+  timestep_modulation: "adaln_zero"
+  condition_fusion: "separate_map_safety_cross_attention"
+  safety_residual_gate_init: 0.1     # per-block learnable alpha_l
+  train_diffusion_steps: 12          # NOISE-TABLE LENGTH baked into the weights
+                                     # (t ~ U[0,12), the t12 schedule).  Changing it
+                                     # requires retraining; it does NOT set how many
+                                     # reverse steps inference runs -> see sampling.steps
+  beta_schedule: "squaredcos_cap_v2"
+  sampler: "ddim"
+
+trajectory:
+  degree: 3
+  num_controls: 32                   # validated against long-path fit error
+  curve_points: 128
+
+guidance:
+  lam: 0.01                          # scale with grid side (upstream: 0.02 @ 64)
+  weight: "linear"                   # upstream best: linear field weight
+  policy: "B3_linear_fusion"         # upstream best expansion ratio
+  alpha: 0.25
+  gamma: 0.5
+  num_sources: 64
+  path_points: 128
+  source_method: "M0"                # drop obstacle sources (keep progress hole)
+  projection_radius: 4
+  inflation_cells: 0                 # `blocked` already includes the robot radius
+
+safety_condition:
+  enabled: true
+  num_ellipses: 64
+  ellipse_feature_dim: 6
+  ellipse_embedding: "mlp"
+  add_positional_encoding: true
+  add_modality_embedding: true
+  path_tokens: false                 # the search path is NOT a diffusion token
+  build_corridor_only_near_collision: true   # geometry-side flag (unchanged)
+
+corridor:
+  mode: "trajsafe"                   # full-ellipse corridor (TrajSafe closed loop)
+                                     # legacy alternative: "legacy_local"
+  min_overlap_ratio: 0.10            # corridor.min_overlap_ratio (upstream)
+  constraint_margin_scene: 0.0       # extra inward margin on every half-space
+  bridge:
+    enabled: true
+    max_bridge_per_gap: 1
+  region:
+    safety_margin: 0.02
+    obstacle_window_half: 0.35
+    obstacle_dilation: 0
+    corridor_chunk_size: 512
+    ellipse_axis_min: 0.002
+    ellipse_axis_max: 2.0
+    map_boundary_faces: true
+  local:
+    pad_queries: 4                   # corridor.local.pad_queries
+    min_queries: 8                   # corridor.local.min_queries
+  # Training cache scope.  "full" builds one region per ellipse for the offline
+  # cache because the GT curve is collision-free by construction (a local scope
+  # would yield an EMPTY constraint set and a dead L_corridor).  Inference always
+  # uses the local scope required by section 6.4.
+  training_scope: "full"
+
+# ---------------------------------------------------------------------------
+# Inference-time safety correction (CPCG + terminal convex QP).
+# Both operate on the SAME frozen sample pack: M uniform-arc-length points of the
+# real B-spline curve, each constrained by the ONE convex cell it was assigned to
+# (``A_{j(l)} N_l Q <= b_{j(l)}``).  No Bezier extraction anywhere on this path.
+# The ALM below is RETIRED from the active inference path: it is kept only as a
+# historical comparison module (gp_diffuser/diffusion/bspline_alm.py + test_alm.py)
+# and is never imported by the sampler.
+# ---------------------------------------------------------------------------
+clean_guidance:                      # CPCG: analytic corridor gradient on q0
+  enabled: true
+  method: "analytic_squared_hinge_unormalised"
+  # J(Q) = 1/(2M) * sum_{valid samples/faces} relu(g + margin_scene)^2 with the
+  # FIXED sample count M (never the violated count).  The update is
+  #   d = -grad J  ->  BoundaryDecoder(Q + alpha*step_size*d)
+  # followed by a backtracking line search that only accepts a strict decrease of
+  # the same J.  There is NO re-normalisation of the displacement: ``step_size``
+  # is the real gradient step (scene units) and backtracking shrinks an
+  # overshooting one.  The 1/M factor makes the gradient small, so step_size is
+  # O(10..100) - re-scan it whenever constraint_points or the geometry changes.
+  # Probe on the 12-step model (5 real test scenes, C group final violation):
+  #   2 -> 10.96 m | 5 -> 10.13 | 10 -> 8.75 | 20 -> 6.15 | 50 -> 2.69 m
+  #  100 -> 4.77 m | 200/400 -> 6.34 m  (past the optimum the first alpha fails
+  #  and backtracking lands on a smaller effective step).  50 is the minimum.
+  step_size: 50.0
+  backtrack_factors: [1.0, 0.5, 0.25, 0.125, 0.0625]
+  margin_scene: 0.0                  # corridor.safety_margin already applies
+  guide_on_corridor_creation_step: true
+  guide_every_step_after_creation: true
+
+final_projection:                    # ONE terminal convex QP per sample
+  enabled: true
+  solver: "osqp"
+  objective: "identity_proximity"
+  eps_abs: 1.0e-5
+  eps_rel: 1.0e-5
+  max_iter: 10000
+  polish: true
+  feasibility_tol_scene: 1.0e-4
+
+alm:                                 # LEGACY (not used by the sampler any more)
+  enabled: false
+  mode: "guided_bspline"
+  inner_steps: 100
+  step_size: 0.05
+  rho: 5.0
+  proximity_weight: 1.0
+  correction_smooth_weight: 0.1
+  constraint_tol: 0.001
+  max_curve_step_scene: 0.05
+  inherit_dual_across_reverse_steps: false
+  dense_verify_points: 512           # fallback for sampling.dense_verify_points
+
+sampling:
+  safety_generation: "once_at_intermediate_step"
+  # 0-based forward index at which the one-shot safety geometry (search ->
+  # ellipses -> corridor -> pack) is built and CPCG starts.  ``null`` falls back
+  # to ``mid_forward_fraction`` of the executed steps.
+  geometry_forward: 1
+  mid_forward_fraction: 0.5          # used only when geometry_forward is null
+  reuse_safety_geometry: true
+  # Number of EXECUTED reverse steps == number of denoiser forwards.  With the
+  # t12 table this runs the whole trained schedule (12 forwards); ``pick_times``
+  # only acts as a DDIM subsampler when steps < train_diffusion_steps.
+  steps: 12
+  seed: 0
+  # ---- uniform-arc-length constraint sampling (CPCG + QP) -------------------
+  # ``constraint_points`` M: number of real curve points the constraints are
+  # evaluated on (and the QP rows are built from).  ``arc_length_lookup_points``
+  # L: resolution of the u <- s inversion on the frozen reference curve.
+  # u_l / N_l / region_id are computed ONCE per run and never re-sampled.
+  constraint_points: 256
+  arc_length_lookup_points: 1024
+  dense_verify_points: 512           # independent collision check after the QP
+  heading_tol_deg: 20.0              # final acceptance tolerance on the start/goal tangent
+
+training:
+  epochs: 1
+  batch_size: 4
+  lr: 0.0002
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  collision_margin_m: 0.3
+  log_every: 10
+  ckpt_dir: "outputs/checkpoints"
+
+dataset:
+  res_m: 0.25
+  grid: 256
+  extent_m: 64.0
+  robot_radius_cells: 2
+  min_geodesic_m: 20.0
+  path_points: 128
+  train_size: 32
+  val_size: 8
+  test_size: 8
+  cache_dir: "outputs/cache"
+
+loss_weights:
+  lambda_u: 1.0            # interior-control MSE, Map-only branch
+  lambda_c: 1.0            # interior-control MSE, safety branch
+  lambda_align: 0.5        # dual-branch: Map-only chases the safety branch
+  lambda_boundary: 0.2     # RAW control polygon near both endpoints (TrajSafe 0.2)
+  lambda_smooth: 0.15      # 2nd/3rd differences of the control polygon
+  lambda_curve: 0.15       # same on the decoded curve
+  lambda_safe: 0.15        # THE continuous corridor violation (TrajSafe 0.15)
+
+dual_branch_training:
+  enabled: true
+  shared_diffusion_parameters: true
+  map_only_branch: true
+  safety_conditioned_branch: true
+  same_noise_and_timestep: true
+  synchronous_forward: true
+  joint_backward: true
+  align_target: "stop_gradient_safety_conditioned"
+
+evaluation:
+  figure_dir: "outputs/figures"
+  report_dir: "outputs/reports"
+  collision_res_m: 0.05
+  timings: true
