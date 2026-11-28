@@ -116,8 +116,9 @@ def main() -> int:
     parser.add_argument("--pick-seed", type=int, default=0)
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--ncols", type=int, default=5)
-    parser.add_argument("--safety-mode", default="full",
-                        choices=["full", "map_only", "no_alm"])
+    parser.add_argument("--safety-mode", default="cpcg",
+                        choices=["map_only", "safety_only", "cpcg",
+                                 "full", "no_alm"])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--outdir", default="outputs/figures/predictions")
     opts = parser.parse_args()
@@ -230,18 +231,18 @@ def main() -> int:
                 ax.plot(old[:, 0], old[:, 1], color=cols[j], lw=0.6, alpha=0.30)
             cur = _px(_np(entry["x0_scene"][0]), grid)
             ax.plot(cur[:, 0], cur[:, 1], color="#d62728", lw=1.6)
-            if entry.get("x0_alm_scene") is not None:
-                alm = _px(_np(entry["x0_alm_scene"][0]), grid)
-                ax.plot(alm[:, 0], alm[:, 1], color="magenta", lw=1.0, ls=":")
+            if entry.get("x0_guided_scene") is not None:
+                guided = _px(_np(entry["x0_guided_scene"][0]), grid)
+                ax.plot(guided[:, 0], guided[:, 1], color="magenta", lw=1.0, ls=":")
             ax.scatter(sg_px[:, 0], sg_px[:, 1], s=14, c=["#2ca02c", "#d62728"],
                        zorder=5, edgecolors="k", linewidths=0.3)
             ax.set_title("%d/%d t=%d %s" % (k + 1, len(trace), entry["t"],
-                                            "ALM" if entry.get("alm")
+                                            "CPCG" if entry.get("constraint_guidance_applied")
                                             else entry["branch"][:3]), fontsize=6)
         for k in range(len(trace), nrows * ncols):
             axes[k // ncols, k % ncols].axis("off")
         fig.suptitle("sample %d — corridor(green) ellipses(purple) search(orange) GT(blue) "
-                     "x0(red) after-ALM(magenta)" % index, fontsize=10)
+                     "x0(red) after-CPCG(magenta)" % index, fontsize=10)
         fig.tight_layout()
         steps_png = os.path.join(outdir, "sample%02d_steps.png" % index)
         fig.savefig(steps_png, dpi=100)
@@ -260,7 +261,9 @@ def main() -> int:
                         "length_m": float(metrics["length_m"]), "gt_length_m": gt_len,
                         "corridor_cells": int(info.get("local_cells", 0)),
                         "corridor_scope": info.get("scope"),
-                        "alm_steps": len(out["alm_stats"]),
+                        "guidance_steps": int(out.get("guidance_steps", 0)),
+                        "qp_status": out["final_qp_status"][0]
+                        if out.get("final_qp_status") else "not_run",
                         "seconds": float(out["timing"]["total_s"]),
                         "safety_png": os.path.relpath(safety_png, PROJECT_ROOT),
                         "steps_png": os.path.relpath(steps_png, PROJECT_ROOT)})

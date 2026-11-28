@@ -357,10 +357,16 @@ def test_all_collision_intervals_are_used(cfg):
 
 
 # --------------------------------------------------------------------------- #
-# P1-2
+# P1-2 (CPCG variant)
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("index", [0, 1])
-def test_alm_runs_only_with_local_convex_cells(pipeline, cfg, index):
+def test_guidance_never_moves_a_sample_without_constraints(pipeline, cfg, index):
+    """A pack that constrains nothing must leave the clean prediction untouched.
+
+    The retired ALM used to be skipped by a ``local_cells > 0`` gate.  CPCG needs
+    no gate: with no violated valid half-space the analytic cost is exactly zero,
+    so the guided prediction is the raw one - even when the corridor has cells.
+    """
     dataset = SyntheticTrajectoryDataset(cfg, "test")
     item = dataset[index]
     out = pipeline["sampler"].sample(
@@ -368,8 +374,14 @@ def test_alm_runs_only_with_local_convex_cells(pipeline, cfg, index):
         heading=item["heading"][None], heading_valid=item["heading_valid"][None],
         steps=8, seed=0)
     local = int(out["corridor_info"].get("local_cells", 0))
-    assert (local > 0) == (len(out["alm_stats"]) > 0), (
-        "local_cells=%d but alm_stats=%d" % (local, len(out["alm_stats"])))
+    assert local >= 0
+    for step in out["steps_trace"]:
+        if not step["constraint_guidance_applied"]:
+            continue
+        stats = step["guidance"]
+        if stats["violated_count_before"] == 0.0:
+            assert stats["delta_max_scene"] == 0.0, (
+                "local_cells=%d, but a satisfied pack moved the controls" % local)
 
 
 def test_corridor_loss_ignores_box_cells(pipeline, sample, cfg):
@@ -434,22 +446,36 @@ def test_failed_search_is_not_a_path(pipeline, sample, monkeypatch):
     assert out["safety_condition"] is None
     assert bool(out["search_failed"][0])
     assert out["valid"] is False
-    assert out["alm_stats"] == []
+    assert out["guidance_stats"] == []
+    assert not bool(out["corridor_certified"].any())
 
 
 # --------------------------------------------------------------------------- #
-# P1-5
+# P1-5 (CPCG variant: no accept/reject gate, the trust region does the work)
 # --------------------------------------------------------------------------- #
-def test_accept_correction_rejects_worse():
-    from gp_diffuser.diffusion.sampler_conditional_dit import ConditionalDiTSampler
-    active = torch.tensor([True, True, True, False])
-    col_before = torch.tensor([0.1, 0.0, 0.0, 0.0])
-    col_after = torch.tensor([0.0, 0.2, 0.0, 0.0])     # sample 1 gets worse
-    viol_before = torch.tensor([1.0, 1.0, 0.5, 1.0])
-    viol_after = torch.tensor([0.0, 0.0, 0.9, 0.0])    # sample 2 violation grows
-    accept = ConditionalDiTSampler.accept_correction(active, col_before, col_after,
-                                                     viol_before, viol_after)
-    assert accept.tolist() == [True, False, False, False]
+def test_trust_region_limits_the_guidance_step():
+    from gp_diffuser.diffusion.clean_guidance import clean_prediction_guidance
+    from gp_diffuser.models.boundary import BoundaryDecoder
+    from gp_diffuser.safety.local_regions import box_cell_faces, pack_from_tables
+    from gp_diffuser.trajectory.bspline import BSplineCodec
+
+    codec = BSplineCodec(degree=3, num_controls=32, curve_points=128)
+    A, b = box_cell_faces(0.0)
+    table = {"cell_A": np.repeat(A[None], 32, axis=0),
+             "cell_b": np.repeat(b[None], 32, axis=0),
+             "cell_mask": np.ones(32, dtype=bool),
+             "cell_is_box": np.ones(32, dtype=bool),
+             "anchors": np.linspace(0.0, 1.0, 32)}
+    pack = pack_from_tables(codec, [table])
+    decoder = BoundaryDecoder(dtype=torch.float32)
+    start_goal = torch.tensor([[[-0.9, -0.9], [0.9, 0.9]]])
+    q = torch.zeros(1, 32, 2)
+    q[0, 8:16] = torch.tensor([1.45, 0.0])
+    q = decoder(q, start_goal)
+    limit = 0.005
+    guided, _ = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                          step_size=10.0, max_delta_scene=limit)
+    assert float((guided - q).norm(dim=-1).max()) <= limit + 1e-6
 
 
 # --------------------------------------------------------------------------- #

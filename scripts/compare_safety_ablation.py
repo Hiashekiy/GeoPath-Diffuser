@@ -295,7 +295,8 @@ def main() -> int:
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--safety-mode", default="map_only",
-                        choices=["map_only", "full", "no_alm"])
+                        choices=["map_only", "safety_only", "cpcg",
+                                 "full", "no_alm"])
     parser.add_argument("--out", default="outputs/reports/ablation_safety_ablation.json")
     parser.add_argument("--figure-dir", default=FIGURE_DIR)
     parser.add_argument("--no-figures", action="store_true")

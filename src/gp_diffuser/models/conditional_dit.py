@@ -24,7 +24,7 @@ safety-only sub-modules, which are simply not executed in Map-only mode.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -46,7 +46,12 @@ def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch
 
 
 class Attention(nn.Module):
-    """Plain multi-head attention (the component DiT uses)."""
+    """Plain multi-head attention (the component DiT uses).
+
+    ``kv`` accepts a pre-projected ``(k, v)`` pair: the map context and the
+    ellipse memory never change across DDIM steps, so their K/V are projected
+    once per run (``project_kv``) instead of once per step per block.
+    """
 
     def __init__(self, dim: int, num_heads: int = 6, qkv_bias: bool = True):
         super().__init__()
@@ -57,18 +62,26 @@ class Attention(nn.Module):
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
 
+    def _heads(self, t: torch.Tensor) -> torch.Tensor:
+        B, M, _ = t.shape
+        return t.reshape(B, M, self.heads, self.head_dim).transpose(1, 2)
+
+    def project_kv(self, context: torch.Tensor) -> tuple:
+        """``context [B,M,D]`` -> head-shaped ``(k, v)`` for reuse across calls."""
+        _, k, v = self.qkv(context).chunk(3, dim=-1)
+        return self._heads(k), self._heads(v)
+
     def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None,
-                key_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                key_mask: Optional[torch.Tensor] = None,
+                kv: Optional[tuple] = None) -> torch.Tensor:
         """``x [B,N,D]``; ``context [B,M,D]`` for cross-attention."""
-        source = x if context is None else context
-        q = self.qkv(x).chunk(3, dim=-1)[0]
-        kv = self.qkv(source)
-        _, k, v = kv.chunk(3, dim=-1)
-        B, N, _ = q.shape
-        M = k.shape[1]
-        q = q.reshape(B, N, self.heads, self.head_dim).transpose(1, 2)
-        k = k.reshape(B, M, self.heads, self.head_dim).transpose(1, 2)
-        v = v.reshape(B, M, self.heads, self.head_dim).transpose(1, 2)
+        if context is None and kv is None:
+            q, k, v = (self._heads(t) for t in self.qkv(x).chunk(3, dim=-1))
+        else:
+            q = self._heads(self.qkv(x).chunk(3, dim=-1)[0])
+            k, v = self.project_kv(context) if kv is None else kv
+        B, N = q.shape[0], q.shape[2]
+        M = k.shape[2]
         bias = None
         if key_mask is not None:
             bias = torch.zeros(B, 1, 1, M, dtype=q.dtype, device=q.device)
@@ -76,6 +89,26 @@ class Attention(nn.Module):
         out = F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
         out = out.transpose(1, 2).reshape(B, N, self.heads * self.head_dim)
         return self.proj(out)
+
+
+def mask_plan(mask: Optional[torch.Tensor]) -> Tuple[str, Optional[torch.Tensor]]:
+    """Decide ONCE per forward how a fixed ellipse mask is applied.
+
+    ``"plain"``  no ellipse is masked out -> run the cross-attention unmasked;
+    ``"none"``   every row is masked out  -> the residual is exactly zero;
+    ``"subset"`` some rows are valid      -> gather those rows (index returned).
+
+    Doing this per block costs one device->host sync per layer, per step: the
+    mask never changes during sampling, so it is resolved a single time.
+    """
+    if mask is None:
+        return "plain", None
+    rows = mask.any(dim=-1)
+    if not bool(rows.any()):
+        return "none", None
+    if bool(mask.all()):
+        return "plain", None
+    return "subset", rows.nonzero(as_tuple=False).squeeze(1)
 
 
 class DiTBlock(nn.Module):
@@ -105,33 +138,35 @@ class DiTBlock(nn.Module):
 
     # --------------------------------------------------------------- safety CA
     def _safety_residual(self, x: torch.Tensor, shift: torch.Tensor,
-                         scale: torch.Tensor, safety_memory: torch.Tensor,
-                         safety_mask: Optional[torch.Tensor]) -> torch.Tensor:
+                         scale: torch.Tensor, safety_kv: tuple,
+                         safety_mask: Optional[torch.Tensor] = None,
+                         safety_idx: Optional[torch.Tensor] = None) -> torch.Tensor:
         """``alpha_l * SafetyCA(AdaLN_safe(x), ellipse memory)``.
 
-        Samples whose ellipse mask is entirely False are skipped, so their safety
-        residual is exactly zero and the attention never sees an all ``-inf`` row
-        (which would produce NaN).  The valid rows are computed in one batched call
-        and scattered back.
+        Samples whose ellipse mask is entirely False are skipped by the caller, so
+        their safety residual is exactly zero and the attention never sees an all
+        ``-inf`` row (which would produce NaN).  The valid rows are computed in one
+        batched call and scattered back; ``safety_idx`` is decided once per
+        forward by :func:`mask_plan`, never per block.
         """
         query = modulate(self.norm_safe(x), shift, scale)
-        if safety_mask is None:
-            return self.safety_gate * self.safety_cross_attn(query, context=safety_memory)
-        valid = safety_mask.any(dim=-1)
-        if not bool(valid.any()):
-            return torch.zeros_like(x)
-        idx = valid.nonzero(as_tuple=False).squeeze(1)
+        if safety_idx is None:
+            return self.safety_gate * self.safety_cross_attn(query, kv=safety_kv)
         selected = self.safety_cross_attn(
-            query.index_select(0, idx),
-            context=safety_memory.index_select(0, idx),
-            key_mask=safety_mask.index_select(0, idx))
-        residual = torch.zeros_like(query).index_copy(0, idx, selected)
+            query.index_select(0, safety_idx),
+            key_mask=safety_mask.index_select(0, safety_idx),
+            kv=tuple(t.index_select(0, safety_idx) for t in safety_kv))
+        residual = torch.zeros_like(query).index_copy(0, safety_idx, selected)
         return self.safety_gate * residual
 
     # ----------------------------------------------------------------- forward
-    def forward(self, x: torch.Tensor, c: torch.Tensor, map_context: torch.Tensor,
+    def forward(self, x: torch.Tensor, c: torch.Tensor,
+                map_context: Optional[torch.Tensor] = None,
                 safety_memory: Optional[torch.Tensor] = None,
-                safety_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                safety_mask: Optional[torch.Tensor] = None,
+                map_kv: Optional[tuple] = None,
+                safety_kv: Optional[tuple] = None,
+                safety_idx: Optional[torch.Tensor] = None) -> torch.Tensor:
         (shift_sa, scale_sa, gate_sa,
          shift_map, scale_map, gate_map,
          shift_safe, scale_safe,
@@ -140,10 +175,15 @@ class DiTBlock(nn.Module):
         x = x + gate_sa.unsqueeze(1) * self.self_attn(
             modulate(self.norm_sa(x), shift_sa, scale_sa))
         x = x + gate_map.unsqueeze(1) * self.map_cross_attn(
-            modulate(self.norm_map(x), shift_map, scale_map), context=map_context)
-        if safety_memory is not None:
+            modulate(self.norm_map(x), shift_map, scale_map),
+            context=map_context, kv=map_kv)
+        if safety_kv is None and safety_memory is not None:
+            mode, safety_idx = mask_plan(safety_mask)
+            if mode != "none":
+                safety_kv = self.safety_cross_attn.project_kv(safety_memory)
+        if safety_kv is not None:
             x = x + self._safety_residual(x, shift_safe, scale_safe,
-                                          safety_memory, safety_mask)
+                                          safety_kv, safety_mask, safety_idx)
         x = x + gate_mlp.unsqueeze(1) * self.mlp(
             modulate(self.norm_mlp(x), shift_mlp, scale_mlp))
         return x
@@ -221,31 +261,68 @@ class ConditionalDiT(nn.Module):
                                  % (self.num_ellipses, tuple(mask.shape)))
         return memory, mask
 
+    # ----------------------------------------------------- frozen K/V (inference)
+    def build_map_kv(self, map_context: torch.Tensor) -> List[tuple]:
+        """Per-block ``(k, v)`` of the map context, built ONCE per run.
+
+        The map context is frozen for the whole reverse process, so its K/V do
+        not change between DDIM steps: projecting them once removes the dominant
+        per-step cost (12 x projection over 1026 tokens) without changing the
+        result.
+        """
+        return [b.map_cross_attn.project_kv(map_context) for b in self.blocks]
+
+    def build_safety_kv(self, safety_memory: torch.Tensor) -> List[tuple]:
+        """Per-block ``(k, v)`` of the ellipse memory, built ONCE per run."""
+        return [b.safety_cross_attn.project_kv(safety_memory) for b in self.blocks]
+
     # ---------------------------------------------------------------- forward
     def forward(self, q_t: torch.Tensor, t: torch.Tensor,
-                map_context: torch.Tensor,
+                map_context: Optional[torch.Tensor] = None,
                 safety_memory: Optional[torch.Tensor] = None,
-                safety_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                safety_mask: Optional[torch.Tensor] = None,
+                map_kv: Optional[List[tuple]] = None,
+                safety_kv: Optional[List[tuple]] = None) -> torch.Tensor:
         """``q_t [B,C,2]`` + timestep -> predicted clean controls ``[B,C,2]``.
 
         ``safety_memory=None`` is the Map-only mode: the Safety Cross-Attention is
         not executed at all.  Passing it executes every block's safety path with
         the ellipse memory only.
+
+        ``map_kv`` / ``safety_kv`` accept the pre-projected pairs from
+        :meth:`build_map_kv` / :meth:`build_safety_kv` (inference only: they are
+        constant across steps).  ``map_context`` may be omitted in that case.
         """
         if q_t.shape[1] != self.num_controls:
             raise ValueError("expected %d control points, got %d"
                              % (self.num_controls, q_t.shape[1]))
         expected = self.map_tokens + 2
-        if map_context.shape[1] != expected:
+        if map_context is not None and map_context.shape[1] != expected:
             raise ValueError("map_context must have %d tokens, got %d"
                              % (expected, map_context.shape[1]))
+        if map_context is None and map_kv is None:
+            raise ValueError("one of map_context / map_kv is required")
         if safety_memory is not None and safety_memory.shape[1] != self.num_ellipses:
             raise ValueError("safety_memory must have %d ellipse tokens, got %d"
                              % (self.num_ellipses, safety_memory.shape[1]))
+
+        # the ellipse mask is fixed for the whole run: resolve it once, not per
+        # block (an all-valid mask is the same as no mask at all)
+        safety_idx = None
+        if safety_kv is not None or safety_memory is not None:
+            mode, safety_idx = mask_plan(safety_mask)
+            if mode == "none":
+                safety_kv, safety_memory, safety_mask = None, None, None
+            elif mode == "plain":
+                safety_mask = None
+
         x = self.traj_embed(q_t)
         c = self.t_embedder(t)
-        for block in self.blocks:
-            x = block(x, c, map_context, safety_memory, safety_mask)
+        for i, block in enumerate(self.blocks):
+            x = block(x, c, map_context, safety_memory, safety_mask,
+                      map_kv=None if map_kv is None else map_kv[i],
+                      safety_kv=None if safety_kv is None else safety_kv[i],
+                      safety_idx=safety_idx)
         return self.head(self.final_norm(x))
 
     # ------------------------------------------------------------- reporting

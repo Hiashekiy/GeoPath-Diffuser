@@ -1,0 +1,64 @@
+# 12-timestep diffusion schedule, C=64 long-path real-data training (2026-11-28)
+#
+# Retro-fits the noise table to the task scale instead of the image-diffusion
+# default of 1000 steps:
+#   * T = 12 (upstream TrajSafe-Diffuser trains with 16 and samples 4),
+#   * inference runs all 12 timesteps (12 forwards, ~0.4 s/sample on the 4070).
+#
+# Retraining is REQUIRED: t ~ U[0,12) is baked into the weights (timestep
+# embedding + noise levels), so an existing T=1000 checkpoint is not reusable.
+# Everything else (DiT-S, losses, dual-branch training, corridor geometry,
+# CPCG + terminal QP) is unchanged.
+#
+#   python scripts/train_dual_branch.py --config configs/c64_t12.yaml \
+#       --dataset real --real-split train --val-split val \
+#       --epochs 100 --steps 0 --batch-size 4 --device cuda \
+#       --ckpt-dir outputs/checkpoints/cpcg_t12_100ep --ckpt-every 10 \
+#       --ckpt-prefix t12 --tag t12_100ep
+
+trajectory:
+  num_controls: 64
+  degree: 3
+  curve_points: 128
+
+diffusion:
+  num_controls: 64
+  train_diffusion_steps: 12          # the noise table this run trains on
+  beta_schedule: "squaredcos_cap_v2"
+
+sampling:
+  steps: 12                          # full trained table at inference
+  mid_forward_fraction: 0.5          # geometry generated at forward 6 of 12
+
+clean_guidance:
+  enabled: true
+  step_size: 10.0
+  max_delta_m: 0.5
+  margin_scene: 0.0
+
+final_projection:
+  enabled: true
+  solver: "osqp"
+
+training:
+  epochs: 100
+  batch_size: 4
+  lr: 0.0002
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  ckpt_dir: "outputs/checkpoints/cpcg_t12_100ep"
+
+# ---- losses (TrajSafe-aligned; see src/gp_diffuser/training/losses.py) ------
+loss_weights:
+  lambda_c: 1.0
+  lambda_u: 1.0
+  lambda_align: 0.5
+  lambda_boundary: 0.2
+  lambda_smooth: 0.15
+  lambda_curve: 0.15
+  lambda_safe: 0.15
+
+model:
+  boundary_decoder:
+    span: 4
+    profile: [1.0, 0.75, 0.5, 0.25]

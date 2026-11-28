@@ -1,11 +1,14 @@
-"""Diagnose two things the staged demo did NOT show: the convex REGIONS and the ALM.
+"""Diagnose the convex REGIONS and the CPCG guidance trace.
 
-1. Draws the actual convex corridors the ALM projects onto (``pack.piece_A/b``,
-   one piece = one convex cell in scene coordinates) instead of only ellipses.
+1. Draws the actual convex corridors CPCG and the terminal QP constrain
+   (``pack.piece_A/b``, one piece = one convex cell in scene coordinates)
+   instead of only ellipses.
 2. Measures whether those regions are trustworthy: for each piece it samples the
    polygon and reports the fraction of sampled area that sits on BLOCKED cells.
-3. Traces the ALM step by step (violation before/after, correction magnitude) and
-   the geometry drift it causes versus the same run with ALM off.
+3. Traces the CPCG step by step (violation before/after, guidance delta) and the
+   geometry it produces versus the same run without any correction.
+
+The file keeps its historical name; the ALM it used to diagnose is retired.
 
     python scripts/diag_regions_and_alm.py --checkpoint <ckpt> --indices 0,1
 """
@@ -133,11 +136,16 @@ def main() -> int:
     pipe = build_pipeline(cfg, device=opts.device, checkpoint=opts.checkpoint)
     sampler, guidance, transform = pipe["sampler"], pipe["guidance"], pipe["transform"]
     res_m = float(dataset.res_m)
-    alm_cfg = sampler._alm_cfg()
-    print("alm config:", json.dumps(alm_cfg, ensure_ascii=False), flush=True)
-    print("1 scene unit = %.1f m -> max_curve_step_scene %.2f = %.2f m"
-          % (transform.scale, alm_cfg.get("max_curve_step_scene", 0.0),
-             alm_cfg.get("max_curve_step_scene", 0.0) * transform.scale), flush=True)
+    guide_cfg = sampler._clean_guidance_cfg()
+    proj_cfg = sampler._final_projection_cfg()
+    print("clean_guidance config:", json.dumps(guide_cfg, ensure_ascii=False),
+          flush=True)
+    print("final_projection config:", json.dumps(proj_cfg, ensure_ascii=False),
+          flush=True)
+    print("1 scene unit = %.1f m -> max_delta_m %.2f = %.4f scene units"
+          % (transform.scale, guide_cfg.get("max_delta_m", 0.0),
+             float(guide_cfg.get("max_delta_m", 0.0))
+             / float(transform.scale)), flush=True)
 
     results = []
     for index in [int(s) for s in opts.indices.split(",") if s.strip()]:
@@ -169,9 +177,10 @@ def main() -> int:
                 regions.append(stat)
 
         out_noalm = sampler.sample(occ, sdf, sg, heading=hd, heading_valid=hv,
-                                   steps=opts.steps, safety_mode="no_alm", seed=opts.seed)
+                                   steps=opts.steps, safety_mode="safety_only",
+                                   seed=opts.seed)
         out_full = sampler.sample(occ, sdf, sg, heading=hd, heading_valid=hv,
-                                  steps=opts.steps, safety_mode="full", seed=opts.seed)
+                                  steps=opts.steps, safety_mode="cpcg", seed=opts.seed)
         noalm_m = out_noalm["trajectory_m"][0].numpy()
         full_m = out_full["trajectory_m"][0].numpy()
 
@@ -181,24 +190,25 @@ def main() -> int:
                     "length_m": float(m["length_m"]),
                     "chamfer_gt_m": _chamfer(curve, gt_m)}
 
-        trace = [e for e in (out_full.get("steps_trace") or []) if e.get("alm")]
-        drift = [e for e in trace if e["alm"]]
+        trace = [e for e in (out_full.get("steps_trace") or [])
+                 if e.get("constraint_guidance_applied")]
         report = {
             "index": int(index),
             "guide": stats(guide_m),
-            "no_alm": stats(noalm_m),
-            "alm": stats(full_m),
-            "alm_vs_no_alm_correction_m": _chamfer(full_m, noalm_m),
-            "alm_steps": len(drift),
+            "safety_only": stats(noalm_m),
+            "cpcg_qp": stats(full_m),
+            "cpcg_vs_safety_only_correction_m": _chamfer(full_m, noalm_m),
+            "guidance_steps": len(trace),
+            "final_qp_status": out_full.get("final_qp_status"),
+            "final_projection_correction_m": float(
+                out_full.get("final_projection_correction_m", 0.0)),
             "per_step": [{"forward": e["forward"],
-                          "viol_before": e["alm"]["max_violation_before"],
-                          "viol_after": e["alm"]["max_violation_after"],
-                          "corr_mean_m": e["alm"]["mean_correction_m"],
-                          "corr_max_m": e["alm"]["max_correction_m"],
-                          "coll_before": e["alm"].get("collision_before"),
-                          "coll_after": e["alm"].get("collision_after"),
-                          "accepted": sum(e["alm"]["accepted_mask"])}
-                         for e in drift],
+                          "viol_before": e["guidance"]["max_violation_before"],
+                          "viol_after": e["guidance"]["max_violation_after"],
+                          "delta_rms_scene": e["guidance"]["delta_rms_scene"],
+                          "delta_max_m": e["guidance"]["delta_max_m"],
+                          "applied": sum(e["guidance"]["guidance_applied_masks"])}
+                         for e in trace],
             "regions": [{k: v for k, v in r.items() if k != "polygon_scene"}
                         for r in regions],
             "region_blocked_fraction_mean": (
@@ -238,7 +248,7 @@ def main() -> int:
             axes[1].plot(p[:, 0], p[:, 1], "-", color="#d62728", lw=2.4,
                          label="searched path")
 
-        base(axes[2], "3) convex regions (ALM constraints) / obstacles inside them")
+        base(axes[2], "3) convex regions (CPCG/QP constraints) / obstacles inside them")
         for r in regions:
             poly = np.asarray(r["polygon_scene"], dtype=np.float64)
             xy = np.stack([(poly[:, 0] + 1.0) * 0.5 * scale_m,
@@ -260,17 +270,17 @@ def main() -> int:
         axes[2].plot([], [], "-", color="#d62728", lw=6, alpha=0.3, label="region>2% blocked")
         axes[2].legend(fontsize=8)
 
-        base(axes[3], "4) safety-injected diffusion (no ALM)")
+        base(axes[3], "4) safety-injected diffusion (no correction)")
         axes[3].plot(guide_m[:, 0], guide_m[:, 1], "--", color="#1f77b4", lw=1.0,
                      alpha=0.5, label="guidance")
         axes[3].plot(noalm_m[:, 0], noalm_m[:, 1], "-", color="#ff7f0e", lw=2.4,
-                     label="no-ALM")
+                     label="safety-only")
 
-        base(axes[4], "5) with ALM convex projection")
+        base(axes[4], "5) with CPCG + terminal QP")
         axes[4].plot(noalm_m[:, 0], noalm_m[:, 1], "--", color="#ff7f0e", lw=1.4,
-                     alpha=0.7, label="no-ALM")
+                     alpha=0.7, label="safety-only")
         axes[4].plot(full_m[:, 0], full_m[:, 1], "-", color="#6a3d9a", lw=2.6,
-                     label="ALM")
+                     label="CPCG + QP")
 
         ax = axes[5]
         if report["per_step"]:
@@ -281,17 +291,17 @@ def main() -> int:
                     color="#2ca02c", label="violation after (scene)")
             ax.set_xlabel("guided reverse step"); ax.set_ylabel("max violation (scene)")
             ax2 = ax.twinx()
-            ax2.plot(xs, [p["corr_mean_m"] for p in report["per_step"]], "--",
-                     color="#1f77b4", label="mean correction (m)")
-            ax2.plot(xs, [p["corr_max_m"] for p in report["per_step"]], ":",
-                     color="#9467bd", label="max correction (m)")
-            ax2.set_ylabel("correction (m)")
+            ax2.plot(xs, [p["delta_rms_scene"] for p in report["per_step"]], "--",
+                     color="#1f77b4", label="delta rms (scene)")
+            ax2.plot(xs, [p["delta_max_m"] for p in report["per_step"]], ":",
+                     color="#9467bd", label="delta max (m)")
+            ax2.set_ylabel("guidance delta")
             h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
             ax.legend(h1 + h2, l1 + l2, fontsize=8, loc="best")
-            ax.set_title("6) ALM trace: what each projection does", fontsize=11)
+            ax.set_title("6) CPCG trace: what each gradient step does", fontsize=11)
         for ax_ in axes:
             ax_.tick_params(labelsize=8)
-        fig.suptitle("val %d | regions & ALM diagnostics | steps=%d" % (index, opts.steps),
+        fig.suptitle("val %d | regions & CPCG diagnostics | steps=%d" % (index, opts.steps),
                      fontsize=13)
         fig.tight_layout()
         png = os.path.join(FIG_DIR, "regions_alm_val%03d.png" % index)

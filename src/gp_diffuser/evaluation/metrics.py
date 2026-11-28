@@ -102,16 +102,22 @@ def trajectory_metrics(points_m: np.ndarray, occupancy: np.ndarray, sdf: np.ndar
 
 
 def corridor_violation_m(points_m: np.ndarray, pack, scene_scale: float,
-                         params: Optional[np.ndarray] = None) -> float:
+                         params: Optional[np.ndarray] = None,
+                         offset: float = 0.0) -> float:
     """Largest half-space violation of the frozen corridor along the trajectory.
 
     Each piece of the pack owns one parameter interval of the curve, so a point is
     only tested against the faces of ITS piece (testing every piece against every
     point would report meaningless "violations" from far-away cells).
+
+    ``SceneTransform.to_scene`` is ``x / scene_scale + offset`` (``offset =
+    -1 + 1/grid``), so ``offset`` MUST be passed: dropping it shifts every test
+    point by one whole scene unit (32 m here) and fabricates a huge violation.
     """
     if pack is None or pack.piece_mask.shape[1] == 0:
         return 0.0
-    pts_scene = np.asarray(points_m, dtype=np.float64).reshape(-1, 2) / float(scene_scale)
+    pts_scene = (np.asarray(points_m, dtype=np.float64).reshape(-1, 2)
+                 / float(scene_scale) + float(offset))
     n = len(pts_scene)
     if n == 0:
         return 0.0

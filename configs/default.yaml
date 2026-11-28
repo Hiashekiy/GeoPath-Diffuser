@@ -4,8 +4,9 @@
 # Sections mirror the design document
 # (docs/安全条件扩散轨迹规划方案_Conditional-DiT网络修正版.md):
 #   map_encoder / map_condition / diffusion / trajectory / guidance /
-#   safety_condition / corridor / alm / sampling / training / dataset /
-#   dual_branch_training / evaluation
+#   safety_condition / corridor / clean_guidance / final_projection / sampling /
+#   training / dataset / dual_branch_training / evaluation
+#   (`alm` is a HISTORICAL block kept only for tests/test_alm.py)
 #
 # NOTE ON UNITS: the trajectory / B-spline / ALM state lives in normalised
 # `[-1, 1]^2` scene coordinates (the same convention as PathSafe
@@ -53,7 +54,10 @@ diffusion:
   timestep_modulation: "adaln_zero"
   condition_fusion: "separate_map_safety_cross_attention"
   safety_residual_gate_init: 0.1     # per-block learnable alpha_l
-  train_diffusion_steps: 1000
+  train_diffusion_steps: 1000        # NOISE-TABLE LENGTH the current weights were
+                                     # trained with (t ~ U[0,1000)).  Changing it
+                                     # requires retraining; it does NOT set how many
+                                     # reverse steps inference runs -> see sampling.steps
   beta_schedule: "squaredcos_cap_v2"
   sampler: "ddim"
 
@@ -85,7 +89,10 @@ safety_condition:
   build_corridor_only_near_collision: true   # geometry-side flag (unchanged)
 
 corridor:
+  mode: "trajsafe"                   # full-ellipse corridor (TrajSafe closed loop)
+                                     # legacy alternative: "legacy_local"
   min_overlap_ratio: 0.10            # corridor.min_overlap_ratio (upstream)
+  constraint_margin_scene: 0.0       # extra inward margin on every half-space
   bridge:
     enabled: true
     max_bridge_per_gap: 1
@@ -106,31 +113,61 @@ corridor:
   # uses the local scope required by section 6.4.
   training_scope: "full"
 
-alm:
+# ---------------------------------------------------------------------------
+# Inference-time safety correction (CPCG + terminal convex QP).
+# The ALM below is RETIRED from the active inference path: it is kept only as a
+# historical comparison module (gp_diffuser/diffusion/bspline_alm.py + test_alm.py)
+# and is never imported by the sampler.
+# ---------------------------------------------------------------------------
+clean_guidance:                      # CPCG: analytic corridor gradient on q0
   enabled: true
+  method: "analytic_squared_hinge"
+  # MEASURED (20 real test scenes, 8 and 50 executed steps, checkpoint d2_ep100):
+  # the plan's start values (0.1 / 0.25) left the gradient step at mm scale
+  # (count-normalised), so the trust region never bound and CPCG barely moved the
+  # curve.  step_size 10 saturates the per-step gradient; max_delta_m is then the
+  # real knob.  0.5 m = best violation/collision gain per unit of added curvature
+  # (see docs/cpcg_report.md 7).  1.0 m is the safety-first option.
+  step_size: 10.0                    # scales the analytic gradient step
+  max_delta_m: 0.5                   # trust region per control point (metres)
+  margin_scene: 0.0                  # corridor.safety_margin already applies
+  guide_on_corridor_creation_step: true
+  guide_every_step_after_creation: true
+
+final_projection:                    # ONE terminal convex QP per sample
+  enabled: true
+  solver: "osqp"
+  objective: "identity_proximity"
+  eps_abs: 1.0e-5
+  eps_rel: 1.0e-5
+  max_iter: 10000
+  polish: true
+  feasibility_tol_scene: 1.0e-4
+
+alm:                                 # LEGACY (not used by the sampler any more)
+  enabled: false
   mode: "guided_bspline"
-  inner_steps: 100                   # alm.inner_steps: upstream 6 never converged here
-                                     # (residual 3.1 m / 8.1% collision even at 200 with
-                                     # the old cap). Measured with cap 0.05: 0.03 m / 0%.
-  step_size: 0.05                    # alm.step_size
-  rho: 5.0                           # alm.rho
+  inner_steps: 100
+  step_size: 0.05
+  rho: 5.0
   proximity_weight: 1.0
   correction_smooth_weight: 0.1
   constraint_tol: 0.001
-  max_curve_step_scene: 0.05         # 0.20 (=6.4 m per point per iteration) saturates the
-                                     # projection: the dual grows but the cap clamps the
-                                     # step, so the residual sticks at ~3 m and the curve
-                                     # still crosses obstacles
-  inherit_dual_across_reverse_steps: true
-  dense_verify_points: 512
+  max_curve_step_scene: 0.05
+  inherit_dual_across_reverse_steps: false
+  dense_verify_points: 512           # fallback for sampling.dense_verify_points
 
 sampling:
   safety_generation: "once_at_intermediate_step"
   mid_forward_fraction: 0.5          # fraction of executed forwards before it
   reuse_safety_geometry: true
-  alm_before_ddim_update: true
-  steps: 50                          # 20/50/100 to be compared, never 4
+  # Number of EXECUTED reverse steps.  ``pick_times`` spreads them uniformly over
+  # the trained noise table, so 8 = 8 denoising forwards (DDIM subsampling); the
+  # same weights are used, no retraining.  ``steps >= train_diffusion_steps``
+  # would run the whole table - not what any run of this repo does by default.
+  steps: 8
   seed: 0
+  dense_verify_points: 512           # independent collision check after the QP
   heading_tol_deg: 20.0              # final acceptance tolerance on the start/goal tangent
 
 training:

@@ -185,7 +185,9 @@ def main() -> int:
                      "length_m": float(metrics["length_m"]),
                      "endpoint_error_m": float(np.linalg.norm(traj_m[0] - start_m)
                                                + np.linalg.norm(traj_m[-1] - goal_m)),
-                     "alm_steps": len(out["alm_stats"]),
+                     "guidance_steps": int(out.get("guidance_steps", 0)),
+                     "qp_status": (out["final_qp_status"][0]
+                                   if out.get("final_qp_status") else "not_run"),
                      "corridor_cells": int((out["corridor_info"] or {}).get("local_cells", 0)),
                      "seconds": float(out["timing"]["total_s"]),
                      "trajectory_m": traj_m, "trace": out["steps_trace"],

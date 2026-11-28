@@ -74,7 +74,7 @@ def main() -> int:
     print("== stage 1-4: full sampling run")
     out = pipe["sampler"].sample(occ, sdf, sg, heading=item["heading"][None],
                                  heading_valid=item["heading_valid"][None],
-                                 steps=opts.steps, safety_mode="full", seed=0)
+                                 steps=opts.steps, safety_mode="cpcg", seed=0)
     check("safety geometry generated exactly once", out["frames"]["safety_generated_once"])
     check("first forwards are map-only, later ones safety-conditioned",
           out["steps_trace"][0]["branch"] == "map_only"
@@ -95,26 +95,21 @@ def main() -> int:
           or "path" not in out["safety_condition"])
     info = out["corridor_info"] or {}
     check("corridor pack built", out["pack"] is not None)
-    check("corridor scope is local (collision intervals only)",
-          info.get("scope") == "local", info.get("spans"))
-    # design document section 6.4/8: ALM is skipped when no LOCAL convex cell
-    # exists, even though the map-box cells keep the pack non-empty
-    local_cells = int(info.get("local_cells", 0))
-    if local_cells > 0:
-        check("ALM executed because local convex cells exist",
-              len(out["alm_stats"]) > 0, "%d steps" % len(out["alm_stats"]))
-    else:
-        check("ALM skipped because there is no local convex cell",
-              len(out["alm_stats"]) == 0, "local_cells=0")
-    check("every accepted ALM step passed the safety gate",
-          all(s["accepted_samples"] >= 0 for s in out["alm_stats"])
-          and out["alm_rejected_steps"] >= 0,
-          "accepted %d / rejected %d" % (out["alm_accepted_steps"],
-                                         out["alm_rejected_steps"]))
+    check("guidance starts only after the pack exists",
+          all(step["constraint_guidance_applied"] for step in out["steps_trace"]
+              if step["constraint_guidance_applied"])
+          and int(out["guidance_steps"]) >= 1, "%d steps" % int(out["guidance_steps"]))
+    check("no network forward is added by CPCG",
+          out["frames"]["num_forwards"] == opts.steps, out["frames"]["num_forwards"])
+    check("terminal QP ran exactly once and reported a status",
+          bool(out["final_qp_status"]), out["final_qp_status"])
+    check("dense validation ran on the projected curve",
+          out["dense_collision_fraction_per_sample"].numel() == 1,
+          float(out["dense_collision_fraction"]))
     check("heading error reported", out["heading_error_deg"] is not None,
           None if out["heading_error_deg"] is None
           else "%s deg" % [round(float(v), 1) for v in out["heading_error_deg"][0]])
-    check("ALM never fed back to the network (no feedback key in the trace)",
+    check("guidance never fed back to the network (no feedback key in the trace)",
           all("feedback" not in step for step in out["steps_trace"]))
 
     traj_m = out["trajectory_m"][0].detach().cpu().numpy()

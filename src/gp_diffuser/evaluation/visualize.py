@@ -7,7 +7,11 @@ Panels (per sample):
 * the single searched path returned by the guidance field,
 * the 64 PathSafe ellipses and the local convex regions actually built
   (box cells outside the collision intervals are drawn faintly),
-* the final trajectory with its B-spline control polygon.
+* the three clean predictions side by side (``x0_pred`` -> ``x0_guided`` after
+  CPCG -> ``x0_projected`` after the terminal QP) together with the B-spline
+  control polygon and the exact Bezier piece polygons of the frozen pack
+  (``record_curves=True`` fills the guided / projected curves, the control
+  polygon is always drawn).
 
 Usage::
 
@@ -35,6 +39,45 @@ def _ellipse_polygon(center, a, b, theta_cos2, theta_sin2, n: int = 64):
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
     return local @ rot.T + np.asarray(center)
+
+
+def _to_np(value, dtype=np.float64) -> np.ndarray:
+    """Tensor (any device) / array -> host numpy array."""
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    return np.asarray(value, dtype=dtype)
+
+
+def _plot_bezier_pieces(ax, pack, controls, transform, to_m, max_pieces: int = 48):
+    """Draw the Bezier control polygons of the frozen constraint pack.
+
+    ``beta_r = E_r Q`` are the four exact Bezier controls of every piece, so the
+    polygon drawn here is the convex hull the QP and CPCG actually constrain -
+    not a resampled curve.
+    """
+    if pack is None or controls is None:
+        return
+    try:
+        import torch
+
+        extraction = pack.extraction
+        piece_mask = pack.piece_mask
+        if extraction.shape[1] == 0 or not bool(piece_mask.any()):
+            return
+        extraction = pack.extraction.detach().float().cpu()
+        q = (controls if torch.is_tensor(controls) else torch.as_tensor(controls))
+        q = (q[0:1] if q.dim() == 3 else q[None]).detach().float().cpu()
+        beta = torch.einsum("prk,bkd->bprd", extraction[0:1], q)[0]
+        keep = piece_mask[0].nonzero(as_tuple=False).squeeze(1).tolist()
+        if not keep:
+            return
+        stride = max(1, int(np.ceil(len(keep) / float(max_pieces))))
+        for i in keep[::stride]:
+            pts = to_m(beta[i].detach().cpu().numpy())
+            ax.plot(pts[:, 0], pts[:, 1], "-", color="#8c564b", lw=0.5,
+                    alpha=0.55, marker=".", ms=1.4)
+    except Exception:                                  # visualisation must not fail
+        return
 
 
 def render_sample(out: Dict, sample: Dict, path: Optional[str] = None,
@@ -80,8 +123,7 @@ def render_sample(out: Dict, sample: Dict, path: Optional[str] = None,
                 label="initial diffusion guide")
     search = out.get("search_path_m")
     if search is not None:
-        search = np.asarray(search[0] if np.ndim(search) == 3 else search,
-                            dtype=np.float64)
+        search = _to_np(search[0] if np.ndim(search) == 3 else search)
         ax.plot(search[:, 0], search[:, 1], color="#2ca02c", lw=2.2,
                 label="searched path (single)")
     ax.plot(*start, "o", color="#2ca02c", ms=9, label="start")
@@ -94,8 +136,7 @@ def render_sample(out: Dict, sample: Dict, path: Optional[str] = None,
     ellipses = out.get("ellipses")
     scene_scale = float(sample.get("scene_scale", 32.0))
     if ellipses is not None:
-        ell = np.asarray(ellipses[0] if np.ndim(ellipses) == 3 else ellipses,
-                         dtype=np.float64)
+        ell = _to_np(ellipses[0] if np.ndim(ellipses) == 3 else ellipses)
         centers_m = transform.to_meters(ell[:, 0:2]) if transform is not None else ell[:, 0:2]
         axes_len_m = ell[:, 2:4] * (scene_scale if transform is None else transform.scale)
         for i in range(len(ell)):
@@ -130,31 +171,57 @@ def render_sample(out: Dict, sample: Dict, path: Optional[str] = None,
             transform=ax.transAxes, va="top", fontsize=8,
             bbox=dict(fc="white", alpha=0.8, lw=0))
 
-    # ---------------- panel 3: final trajectory ---------------------------
+    # ---------------- panel 3: CPCG + terminal QP ------------------------
     ax = axes[2]
-    ax.set_title("(c) Final trajectory (after ALM + DDIM)")
-    traj = np.asarray(out["trajectory_m"], dtype=np.float64)
+    ax.set_title("(c) x0_pred -> x0_guided (CPCG) -> x0_projected (QP)")
+    traj = _to_np(out["trajectory_m"])
     traj = traj[0] if traj.ndim == 3 else traj
     ax.plot(gt[:, 0], gt[:, 1], color="#1f77b4", lw=2.0, alpha=0.7, label="GT path")
+
+    def _curve(key):
+        value = out.get(key)
+        if value is None:
+            return None
+        value = _to_np(value[0] if np.ndim(value) == 3 else value)
+        return to_m(value)
+
+    final = _curve("x0_final_scene")            # clean controls before the QP
+    projected = _curve("x0_projected_scene")    # after the terminal QP
+    if final is not None:
+        ax.plot(final[:, 0], final[:, 1], color="#ff7f0e", lw=1.4, ls=":",
+                label="x0 before QP")
+    if projected is not None:
+        ax.plot(projected[:, 0], projected[:, 1], color="#2ca02c", lw=1.4, ls="--",
+                label="x0 after QP")
     dense = out.get("trajectory_dense_m")
     if dense is not None:
-        dense = np.asarray(dense[0] if np.ndim(dense) == 3 else dense, dtype=np.float64)
-        ax.plot(dense[:, 0], dense[:, 1], color="#d62728", lw=2.4, label="prediction (512 pts)")
+        dense = _to_np(dense[0] if np.ndim(dense) == 3 else dense)
+        ax.plot(dense[:, 0], dense[:, 1], color="#d62728", lw=2.4, label="final (512 pts)")
     else:
-        ax.plot(traj[:, 0], traj[:, 1], color="#d62728", lw=2.4, label="prediction (128 pts)")
+        ax.plot(traj[:, 0], traj[:, 1], color="#d62728", lw=2.4, label="final (128 pts)")
+
+    # the exact Bezier pieces of the frozen pack: b_r = E_r Q
+    _plot_bezier_pieces(ax, out.get("pack"), out["controls"], transform, to_m)
+
     controls = out["controls"]
     controls = controls[0] if np.ndim(controls) == 3 else controls
-    ctrl_m = transform.to_meters(np.asarray(controls, dtype=np.float64)) \
-        if transform is not None else np.asarray(controls)
+    controls_np = (controls.detach().cpu().numpy() if hasattr(controls, "detach")
+                   else np.asarray(controls, dtype=np.float64))
+    ctrl_m = (transform.to_meters(controls_np) if transform is not None
+              else controls_np)
     ax.plot(ctrl_m[:, 0], ctrl_m[:, 1], "-", color="#7f7f7f", lw=0.9, marker="o",
             ms=2.4, label="control polygon")
     ax.plot(*start, "o", color="#2ca02c", ms=9)
     ax.plot(*goal, "s", color="#d62728", ms=9)
     valid = out.get("valid")
     collision = out.get("dense_collision_fraction", 0.0)
+    qp_status = out.get("final_qp_status") or []
     ax.text(0.02, 0.98,
-            "valid=%s\ncollision=%.3f\nALM steps=%d"
-            % (valid, collision, len(out.get("alm_stats", []))),
+            "valid=%s  certified=%s\ncollision=%.3f\nCPCG steps=%d\nQP: %s (%.0f ms)"
+            % (valid, out.get("corridor_certified_all", False), collision,
+               int(out.get("guidance_steps", 0)),
+               (qp_status[0] if qp_status else "not run"),
+               1000.0 * float(out.get("final_qp_time_s", 0.0))),
             transform=ax.transAxes, va="top", fontsize=8,
             bbox=dict(fc="white", alpha=0.85, lw=0))
     ax.legend(loc="lower left", fontsize=8, framealpha=0.9)

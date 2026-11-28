@@ -6,8 +6,9 @@ reporting each stage's artefacts instead of only the final curve:
     stage 1  map-only branch  -> guidance trajectory (no safety features at all)
     stage 2  guidance-field search seeded by that trajectory
     stage 3  safety features: ellipse tokens + local convex corridor (A x <= b pack)
-    stage 4  safety-injected diffusion (safety memory on, ALM OFF => safety_mode="no_alm")
-    stage 5  convex-constraint correction (ALM, safety_mode="full")
+    stage 4  safety-injected diffusion (safety memory on, no correction =>
+             safety_mode="safety_only")
+    stage 5  CPCG + terminal convex QP (safety_mode="cpcg")
 
 Every number printed here comes out of the production code path; only the plotting
 glue is new.  Usage::
@@ -130,26 +131,27 @@ def run_scene(sampler, guidance, transform, dataset, index, steps, seed) -> dict
     report["stage4_safety_injected"]["safety_generated_once"] = bool(
         out_noalm["frames"]["safety_generated_once"])
 
-    # ---------------- stage 5: ALM convex correction ------------------------
+    # ---------------- stage 5: CPCG + terminal convex QP --------------------
     out_full = sampler.sample(occ, sdf, sg, heading=hd, heading_valid=hv,
-                              steps=steps, safety_mode="full", seed=seed)
+                              steps=steps, safety_mode="cpcg", seed=seed)
     full_m = out_full["trajectory_m"][0].numpy()
-    report["stage5_alm"] = _curve_stats(full_m, item, res_m)
-    stats = out_full["alm_stats"]
-    report["stage5_alm"]["alm_steps"] = len(stats)
-    report["stage5_alm"]["accepted"] = int(out_full["alm_accepted_steps"])
-    report["stage5_alm"]["rejected"] = int(out_full["alm_rejected_steps"])
+    report["stage5_cpcg_qp"] = _curve_stats(full_m, item, res_m)
+    stats = out_full["guidance_stats"]
+    report["stage5_cpcg_qp"]["guidance_steps"] = len(stats)
+    report["stage5_cpcg_qp"]["qp_status"] = out_full["final_qp_status"]
+    report["stage5_cpcg_qp"]["qp_certified"] = bool(
+        out_full.get("corridor_certified_all", False))
+    report["stage5_cpcg_qp"]["projection_correction_m"] = float(
+        out_full.get("final_projection_correction_m", 0.0))
     if stats:
-        report["stage5_alm"]["violation_before_mean"] = float(
+        report["stage5_cpcg_qp"]["violation_before_mean"] = float(
             np.mean([s["max_violation_before"] for s in stats]))
-        report["stage5_alm"]["violation_after_mean"] = float(
+        report["stage5_cpcg_qp"]["violation_after_mean"] = float(
             np.mean([s["max_violation_after"] for s in stats]))
-        report["stage5_alm"]["feasible_rate_mean"] = float(
-            np.mean([s["feasible_rate"] for s in stats]))
-        report["stage5_alm"]["correction_m_mean"] = float(
-            np.mean([s["mean_correction_m"] for s in stats]))
-        report["stage5_alm"]["correction_m_max"] = float(
-            np.max([s["max_correction_m"] for s in stats]))
+        report["stage5_cpcg_qp"]["delta_rms_scene_mean"] = float(
+            np.mean([s["delta_rms_scene"] for s in stats]))
+        report["stage5_cpcg_qp"]["delta_max_m_mean"] = float(
+            np.mean([s["delta_max_m"] for s in stats]))
     report["final"] = {"guide_to_final_m": _chamfer_m(
         out_full["guide_trajectory_m"][0].numpy(), full_m)}
     return report
@@ -184,11 +186,11 @@ def plot_scene(sampler, guidance, transform, dataset, index, steps, seed, path_p
     raw, _ = sampler._generate_safety(
         occ.to(sampler.device), sdf.to(sampler.device), features,
         out_map["trajectory_scene"][0:1], sg.to(sampler.device),
-        dict(sampler.cfg.get("corridor") or {}))
+        sampler._corridor_cfg())
     out_noalm = sampler.sample(occ, sdf, sg, heading=hd, heading_valid=hv,
-                               steps=steps, safety_mode="no_alm", seed=seed)
+                               steps=steps, safety_mode="safety_only", seed=seed)
     out_full = sampler.sample(occ, sdf, sg, heading=hd, heading_valid=hv,
-                              steps=steps, safety_mode="full", seed=seed)
+                              steps=steps, safety_mode="cpcg", seed=seed)
 
     fig, axes = plt.subplots(1, 5, figsize=(26, 5.4))
     gt = raw_scene["gt_path_m"]
@@ -232,19 +234,22 @@ def plot_scene(sampler, guidance, transform, dataset, index, steps, seed, path_p
         axes[2].plot(centers_m[:, 0], centers_m[:, 1], ".", color="#9467bd", ms=3)
     axes[2].legend(["ellipse corridor (64 tokens)"], fontsize=8)
 
-    base(axes[3], "4. safety-injected diffusion (no ALM)")
+    base(axes[3], "4. safety-injected diffusion (no correction)")
     axes[3].plot(out_noalm["guide_trajectory_m"][0].numpy()[:, 0],
                  out_noalm["guide_trajectory_m"][0].numpy()[:, 1], "--",
                  color="#1f77b4", lw=1.2, alpha=0.6, label="guidance")
     axes[3].plot(out_noalm["trajectory_m"][0].numpy()[:, 0],
                  out_noalm["trajectory_m"][0].numpy()[:, 1], "-", color="#ff7f0e",
-                 lw=2.2, label="no-ALM final")
+                 lw=2.2, label="safety-only final")
     axes[3].legend(fontsize=8)
 
-    base(axes[4], "5. + ALM convex correction")
+    base(axes[4], "5. + CPCG + terminal QP")
+    axes[4].plot(out_full["controls_unprojected"][0].numpy()[:, 0],
+                 out_full["controls_unprojected"][0].numpy()[:, 1], ":",
+                 color="#ff7f0e", lw=1.3, label="before QP")
     axes[4].plot(out_full["trajectory_m"][0].numpy()[:, 0],
                  out_full["trajectory_m"][0].numpy()[:, 1], "-", color="#9467bd",
-                 lw=2.4, label="ALM final")
+                 lw=2.4, label="CPCG + QP final")
     axes[4].legend(fontsize=8)
 
     fig.suptitle("val sample %d | staged pipeline | steps=%d" % (index, steps), fontsize=12)

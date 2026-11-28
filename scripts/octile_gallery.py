@@ -102,7 +102,11 @@ def main() -> int:
                         "clearance": float(m["min_clearance_m"]),
                         "length": float(m["length_m"]),
                         "valid": bool(out["valid"]),
-                        "alm": len(out["alm_stats"]),
+                        "guidance_steps": int(out.get("guidance_steps", 0)),
+                        "qp_status": (out["final_qp_status"][0]
+                                      if out.get("final_qp_status") else "not_run"),
+                        "projection_correction_m": float(
+                            out.get("final_projection_correction_m", 0.0)),
                         "cells": int((out["corridor_info"] or {}).get("local_cells", 0))})
 
     outdir = os.path.join(PROJECT_ROOT, opts.outdir)
@@ -144,9 +148,10 @@ def main() -> int:
                    for r in results],
                   fh, indent=2, ensure_ascii=False)
     for k, r in enumerate(results):
-        print("#%d chord %.1f m  len %.1f m  coll %.3f  clear %+.2fm  valid %s  cells %d  alm %d"
+        print("#%d chord %.1f m  len %.1f m  coll %.3f  clear %+.2fm  valid %s  "
+              "cells %d  cpcg %d steps  qp %s"
               % (k, r["chord"], r["length"], r["collision"], r["clearance"], r["valid"],
-                 r["cells"], r["alm"]))
+                 r["cells"], r["guidance_steps"], r["qp_status"]))
     print("figure:", os.path.relpath(png, PROJECT_ROOT))
     return 0
 

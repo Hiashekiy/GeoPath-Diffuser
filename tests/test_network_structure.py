@@ -357,7 +357,7 @@ def test_safety_condition_has_no_path_tokens(pipeline, sample):
     assert out["search_path_m"] is not None, "the path still feeds the geometry"
 
 
-def test_sampler_branch_switch_and_alm_interface(pipeline, sample):
+def test_sampler_branch_switch_and_guidance_interface(pipeline, sample):
     item, _ = sample
     out = pipeline["sampler"].sample(item["occupancy"][None], item["sdf"][None],
                                      item["start_goal"][None],
@@ -367,7 +367,8 @@ def test_sampler_branch_switch_and_alm_interface(pipeline, sample):
     branches = [step["branch"] for step in out["steps_trace"]]
     assert branches[0] == "map_only" and branches[-1] in ("map_only", "safety")
     for key in ("controls", "trajectory_m", "valid", "dense_collision_fraction",
-                "alm_stats", "pack", "timing"):
+                "guidance_stats", "final_qp_status", "corridor_certified",
+                "pack", "timing"):
         assert key in out, "the sampler output interface must stay unchanged"
 
 
