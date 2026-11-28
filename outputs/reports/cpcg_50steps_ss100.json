@@ -1,0 +1,2823 @@
+{
+  "checkpoint": "outputs/checkpoints/ab_distill_safeu_e100/d2_ep100.pt",
+  "dataset": "real",
+  "split": "test",
+  "steps": 50,
+  "seed": 0,
+  "overrides": [
+    "clean_guidance.step_size=10.0"
+  ],
+  "tag": "",
+  "clean_guidance": {
+    "enabled": true,
+    "method": "analytic_squared_hinge",
+    "step_size": 10.0,
+    "max_delta_m": 0.25,
+    "margin_scene": 0.0,
+    "guide_on_corridor_creation_step": true,
+    "guide_every_step_after_creation": true
+  },
+  "final_projection": {
+    "enabled": true,
+    "solver": "osqp",
+    "objective": "identity_proximity",
+    "eps_abs": 1e-05,
+    "eps_rel": 1e-05,
+    "max_iter": 10000,
+    "polish": true,
+    "feasibility_tol_scene": 0.0001
+  },
+  "scene_scale": 32.0,
+  "samples": [
+    {
+      "index": 0,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.625,
+          "length_m": 17.84534798590768,
+          "mean_curvature": 0.11713060215608402,
+          "max_curvature": 3.3217648859820783,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 3.977463795588567e-07,
+            "max": 9.5367431640625e-07,
+            "min": 2.9802322387695312e-08,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.2218,
+            "initial_diffusion_s": 0.2654,
+            "search_s": 0.0155,
+            "ellipse_s": 0.1042,
+            "corridor_s": 0.1323,
+            "safety_total_s": 0.2532,
+            "clean_guidance_s": 0.0718,
+            "guided_diffusion_s": 0.2751,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.011,
+            "total_s": 1.2101
+          },
+          "inference_s": 1.2356762000126764
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.625,
+          "length_m": 17.84534798590768,
+          "mean_curvature": 0.11713060215608402,
+          "max_curvature": 3.3217648859820783,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 3.977463795588567e-07,
+            "max": 9.5367431640625e-07,
+            "min": 2.9802322387695312e-08,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0074657000000000005,
+          "final_projection_correction_m": 1.1920928955078125e-07,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0049,
+            "initial_diffusion_s": 0.2177,
+            "search_s": 0.0149,
+            "ellipse_s": 0.027,
+            "corridor_s": 0.0478,
+            "safety_total_s": 0.0908,
+            "clean_guidance_s": 0.0628,
+            "guided_diffusion_s": 0.2762,
+            "final_projection_s": 0.0633,
+            "final_validation_s": 0.0073,
+            "total_s": 0.8295
+          },
+          "inference_s": 0.831661999982316
+        }
+      }
+    },
+    {
+      "index": 1,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.0522351946149584,
+          "length_m": 37.69418384763418,
+          "mean_curvature": 0.05638769115394794,
+          "max_curvature": 0.5353633014358697,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.821647541783225,
+          "corridor_violation_local_m": 0.821647541783225,
+          "step_violation_m": {
+            "mean": 0.6975506025351705,
+            "max": 0.8697893955089206,
+            "min": 0.4160173534410063,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 1.0597867965698242,
+            "max": 1.144083023071289,
+            "min": 0.6967906951904297,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.8571706184974084,
+            "max": 0.9396762847900391,
+            "min": 0.5059680938720703,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999885375684,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0020046399171965625,
+            "max": 0.002033442258834839,
+            "min": 0.001654069870710373,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.8914813995361328,
+          "timing_s": {
+            "map_encode_s": 0.0057,
+            "initial_diffusion_s": 0.2132,
+            "search_s": 0.0146,
+            "ellipse_s": 0.0239,
+            "corridor_s": 0.0567,
+            "safety_total_s": 0.0965,
+            "clean_guidance_s": 0.0673,
+            "guided_diffusion_s": 0.3099,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0073,
+            "total_s": 0.799
+          },
+          "inference_s": 0.8013843000517227
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.0522351946149584,
+          "length_m": 37.69418384763418,
+          "mean_curvature": 0.05638769115394794,
+          "max_curvature": 0.5353633014358697,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.821647541783225,
+          "corridor_violation_local_m": 0.821647541783225,
+          "step_violation_m": {
+            "mean": 0.6975506025351705,
+            "max": 0.8697893955089206,
+            "min": 0.4160173534410063,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 1.0597867965698242,
+            "max": 1.144083023071289,
+            "min": 0.6967906951904297,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.8571706184974084,
+            "max": 0.9396762847900391,
+            "min": 0.5059680938720703,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999885375684,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0020046399171965625,
+            "max": 0.002033442258834839,
+            "min": 0.001654069870710373,
+            "n": 26
+          },
+          "final_qp_status": [
+            "primal infeasible"
+          ],
+          "final_qp_iterations": [
+            425
+          ],
+          "final_qp_time_s": 0.0258008,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.8914813995361328,
+          "timing_s": {
+            "map_encode_s": 0.0048,
+            "initial_diffusion_s": 0.218,
+            "search_s": 0.0139,
+            "ellipse_s": 0.0245,
+            "corridor_s": 0.0541,
+            "safety_total_s": 0.0938,
+            "clean_guidance_s": 0.0665,
+            "guided_diffusion_s": 0.2905,
+            "final_projection_s": 0.0383,
+            "final_validation_s": 0.0077,
+            "total_s": 0.8068
+          },
+          "inference_s": 0.8101528999977745
+        }
+      }
+    },
+    {
+      "index": 2,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.625,
+          "length_m": 13.748952253031934,
+          "mean_curvature": 0.14264607791426714,
+          "max_curvature": 3.31042332460022,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.01978234015405178,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 3.6679781400240387e-08,
+            "max": 2.384185791015625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0055,
+            "initial_diffusion_s": 0.2288,
+            "search_s": 0.0136,
+            "ellipse_s": 0.0273,
+            "corridor_s": 0.0594,
+            "safety_total_s": 0.1015,
+            "clean_guidance_s": 0.0721,
+            "guided_diffusion_s": 0.3001,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0087,
+            "total_s": 0.8072
+          },
+          "inference_s": 0.8098711000056937
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.625,
+          "length_m": 13.748952253031934,
+          "mean_curvature": 0.14264607791426714,
+          "max_curvature": 3.31042332460022,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.01978234015405178,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 3.6679781400240387e-08,
+            "max": 2.384185791015625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0096332,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0079,
+            "initial_diffusion_s": 0.2352,
+            "search_s": 0.0136,
+            "ellipse_s": 0.027,
+            "corridor_s": 0.0547,
+            "safety_total_s": 0.0968,
+            "clean_guidance_s": 0.0829,
+            "guided_diffusion_s": 0.3005,
+            "final_projection_s": 0.0243,
+            "final_validation_s": 0.0076,
+            "total_s": 0.8451
+          },
+          "inference_s": 0.8474889000062831
+        }
+      }
+    },
+    {
+      "index": 3,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.9724222730337013,
+          "length_m": 23.918722150727422,
+          "mean_curvature": 0.04644998805000272,
+          "max_curvature": 0.3468211503855219,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 4.0347759540264423e-07,
+            "max": 9.5367431640625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0053,
+            "initial_diffusion_s": 0.2302,
+            "search_s": 0.0142,
+            "ellipse_s": 0.0274,
+            "corridor_s": 0.0562,
+            "safety_total_s": 0.0989,
+            "clean_guidance_s": 0.0662,
+            "guided_diffusion_s": 0.2945,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0079,
+            "total_s": 0.7891
+          },
+          "inference_s": 0.7914248000015505
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.9724222730337013,
+          "length_m": 23.918722150727422,
+          "mean_curvature": 0.04644998805000272,
+          "max_curvature": 0.3468211503855219,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 4.0347759540264423e-07,
+            "max": 9.5367431640625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0097042,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0069,
+            "initial_diffusion_s": 0.2328,
+            "search_s": 0.0139,
+            "ellipse_s": 0.0262,
+            "corridor_s": 0.0622,
+            "safety_total_s": 0.1035,
+            "clean_guidance_s": 0.0649,
+            "guided_diffusion_s": 0.2866,
+            "final_projection_s": 0.0236,
+            "final_validation_s": 0.0086,
+            "total_s": 0.8171
+          },
+          "inference_s": 0.8195842000422999
+        }
+      }
+    },
+    {
+      "index": 4,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.8637165405375946,
+          "length_m": 36.258083929067595,
+          "mean_curvature": 0.06080090507867167,
+          "max_curvature": 0.8146303744668455,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.15435034632582756,
+          "corridor_violation_local_m": 0.15435034632582756,
+          "step_violation_m": {
+            "mean": 0.0813264882624884,
+            "max": 0.18974924034625928,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.47075682419996995,
+            "max": 0.5174779891967773,
+            "min": 0.004082679748535156,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.2551535459665152,
+            "max": 0.29244232177734375,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24139843630389526,
+            "max": 0.25,
+            "min": 0.026359418407082558,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.001365935458754673,
+            "max": 0.0014361636713147163,
+            "min": 0.00011170776997460052,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.25734806060791016,
+          "timing_s": {
+            "map_encode_s": 0.0054,
+            "initial_diffusion_s": 0.2301,
+            "search_s": 0.015,
+            "ellipse_s": 0.0274,
+            "corridor_s": 0.0532,
+            "safety_total_s": 0.0969,
+            "clean_guidance_s": 0.0649,
+            "guided_diffusion_s": 0.2893,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0068,
+            "total_s": 0.7819
+          },
+          "inference_s": 0.7838219000259414
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.8758354136914106,
+          "length_m": 36.3763891875796,
+          "mean_curvature": 0.07727882631034222,
+          "max_curvature": 0.8146303744668455,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0813264882624884,
+            "max": 0.18974924034625928,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.47075682419996995,
+            "max": 0.5174779891967773,
+            "min": 0.004082679748535156,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.2551535459665152,
+            "max": 0.29244232177734375,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24139843630389526,
+            "max": 0.25,
+            "min": 0.026359418407082558,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.001365935458754673,
+            "max": 0.0014361636713147163,
+            "min": 0.00011170776997460052,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            100
+          ],
+          "final_qp_time_s": 0.010504799999999998,
+          "final_projection_correction_m": 0.273594468832016,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.008,
+            "initial_diffusion_s": 0.2481,
+            "search_s": 0.0141,
+            "ellipse_s": 0.0282,
+            "corridor_s": 0.0488,
+            "safety_total_s": 0.0923,
+            "clean_guidance_s": 0.0689,
+            "guided_diffusion_s": 0.3232,
+            "final_projection_s": 0.0252,
+            "final_validation_s": 0.0079,
+            "total_s": 0.865
+          },
+          "inference_s": 0.8675650000222959
+        }
+      }
+    },
+    {
+      "index": 5,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.5520509481430054,
+          "length_m": 20.26565283145621,
+          "mean_curvature": 0.09344779612345103,
+          "max_curvature": 1.7193233363717106,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0102,
+            "initial_diffusion_s": 0.2483,
+            "search_s": 0.0146,
+            "ellipse_s": 0.026,
+            "corridor_s": 0.0532,
+            "safety_total_s": 0.0949,
+            "clean_guidance_s": 0.06,
+            "guided_diffusion_s": 0.2835,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0077,
+            "total_s": 0.7862
+          },
+          "inference_s": 0.7883089000242762
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.5520509481430054,
+          "length_m": 20.26565283145621,
+          "mean_curvature": 0.09344779612345103,
+          "max_curvature": 1.7193233363717106,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.008655800000000002,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2223,
+            "search_s": 0.0133,
+            "ellipse_s": 0.0242,
+            "corridor_s": 0.0532,
+            "safety_total_s": 0.0922,
+            "clean_guidance_s": 0.0598,
+            "guided_diffusion_s": 0.275,
+            "final_projection_s": 0.0235,
+            "final_validation_s": 0.008,
+            "total_s": 0.7666
+          },
+          "inference_s": 0.7687862000311725
+        }
+      }
+    },
+    {
+      "index": 6,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.875,
+          "length_m": 21.372803866709955,
+          "mean_curvature": 0.049197634217221585,
+          "max_curvature": 1.0768967235356668,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 7.335956280048077e-08,
+            "max": 4.76837158203125e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0048,
+            "initial_diffusion_s": 0.2383,
+            "search_s": 0.0134,
+            "ellipse_s": 0.0276,
+            "corridor_s": 0.0527,
+            "safety_total_s": 0.0948,
+            "clean_guidance_s": 0.0674,
+            "guided_diffusion_s": 0.3113,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0082,
+            "total_s": 0.8151
+          },
+          "inference_s": 0.8178129000007175
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.875,
+          "length_m": 21.372803866709955,
+          "mean_curvature": 0.049197634217221585,
+          "max_curvature": 1.0768967235356668,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 7.335956280048077e-08,
+            "max": 4.76837158203125e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.008567,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.008,
+            "initial_diffusion_s": 0.2046,
+            "search_s": 0.0132,
+            "ellipse_s": 0.0271,
+            "corridor_s": 0.0476,
+            "safety_total_s": 0.0889,
+            "clean_guidance_s": 0.063,
+            "guided_diffusion_s": 0.2999,
+            "final_projection_s": 0.0222,
+            "final_validation_s": 0.0083,
+            "total_s": 0.7785
+          },
+          "inference_s": 0.7811885999981314
+        }
+      }
+    },
+    {
+      "index": 7,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 3.795385170914813,
+          "length_m": 23.43043274689966,
+          "mean_curvature": 0.05061753191788914,
+          "max_curvature": 0.7894083886990758,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0051,
+            "initial_diffusion_s": 0.2288,
+            "search_s": 0.0128,
+            "ellipse_s": 0.0266,
+            "corridor_s": 0.0584,
+            "safety_total_s": 0.0989,
+            "clean_guidance_s": 0.0669,
+            "guided_diffusion_s": 0.311,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0073,
+            "total_s": 0.8018
+          },
+          "inference_s": 0.8038798999623396
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 3.795385170914813,
+          "length_m": 23.43043274689966,
+          "mean_curvature": 0.05061753191788914,
+          "max_curvature": 0.7894083886990758,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.009577500000000001,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0075,
+            "initial_diffusion_s": 0.2572,
+            "search_s": 0.0125,
+            "ellipse_s": 0.0267,
+            "corridor_s": 0.0642,
+            "safety_total_s": 0.1048,
+            "clean_guidance_s": 0.0639,
+            "guided_diffusion_s": 0.2975,
+            "final_projection_s": 0.0233,
+            "final_validation_s": 0.0082,
+            "total_s": 0.845
+          },
+          "inference_s": 0.8481206999858841
+        }
+      }
+    },
+    {
+      "index": 8,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": false,
+          "corridor_certified": false,
+          "collision_rate": 0.13781815403082145,
+          "min_clearance_m": -0.8781567486720475,
+          "length_m": 28.917502899770895,
+          "mean_curvature": 0.09367090227316886,
+          "max_curvature": 0.6994794377975885,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 1.8707094886194682,
+          "corridor_violation_local_m": 1.8707094886194682,
+          "step_violation_m": {
+            "mean": 2.7141891414489625,
+            "max": 3.557931550182616,
+            "min": 1.868480405640753,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 2.2089646412776065,
+            "max": 3.5761547088623047,
+            "min": 2.110780715942383,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 1.995412092942458,
+            "max": 3.353893280029297,
+            "min": 1.898386001586914,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999770751366,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.002217921347787174,
+            "max": 0.002783512230962515,
+            "min": 0.0021738193463534117,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 1.9006900787353516,
+          "timing_s": {
+            "map_encode_s": 0.0059,
+            "initial_diffusion_s": 0.2221,
+            "search_s": 0.0137,
+            "ellipse_s": 0.0209,
+            "corridor_s": 0.061,
+            "safety_total_s": 0.0967,
+            "clean_guidance_s": 0.0696,
+            "guided_diffusion_s": 0.3245,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0078,
+            "total_s": 0.8118
+          },
+          "inference_s": 0.8144392999820411
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.5041961669921875,
+          "length_m": 30.71767123801599,
+          "mean_curvature": 0.28007467038670414,
+          "max_curvature": 5.04553586672925,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 2.7141891414489625,
+            "max": 3.557931550182616,
+            "min": 1.868480405640753,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 2.2089646412776065,
+            "max": 3.5761547088623047,
+            "min": 2.110780715942383,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 1.995412092942458,
+            "max": 3.353893280029297,
+            "min": 1.898386001586914,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999770751366,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.002217921347787174,
+            "max": 0.002783512230962515,
+            "min": 0.0021738193463534117,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            675
+          ],
+          "final_qp_time_s": 0.0408788,
+          "final_projection_correction_m": 2.0214040279388428,
+          "final_corridor_violation_m": 0.000324249267578125,
+          "timing_s": {
+            "map_encode_s": 0.0088,
+            "initial_diffusion_s": 0.226,
+            "search_s": 0.0143,
+            "ellipse_s": 0.0209,
+            "corridor_s": 0.0601,
+            "safety_total_s": 0.0963,
+            "clean_guidance_s": 0.0728,
+            "guided_diffusion_s": 0.3258,
+            "final_projection_s": 0.055,
+            "final_validation_s": 0.0076,
+            "total_s": 0.8788
+          },
+          "inference_s": 0.8810836999909952
+        }
+      }
+    },
+    {
+      "index": 9,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.375,
+          "length_m": 23.347690586706847,
+          "mean_curvature": 0.09700247525090609,
+          "max_curvature": 2.4553272075615693,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.6007239297032356,
+          "corridor_violation_local_m": 0.6007239297032356,
+          "step_violation_m": {
+            "mean": 0.6007239297032356,
+            "max": 0.6007239297032356,
+            "min": 0.6007239297032356,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.601067799788255,
+            "max": 0.6096692085266113,
+            "min": 0.6007237434387207,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.6007237434387207,
+            "max": 0.6007237434387207,
+            "min": 0.6007237434387207,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999770751366,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.001541855122643308,
+            "max": 0.0015486732590943575,
+            "min": 0.0015359856188297272,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.6007237434387207,
+          "timing_s": {
+            "map_encode_s": 0.0064,
+            "initial_diffusion_s": 0.2429,
+            "search_s": 0.0133,
+            "ellipse_s": 0.0255,
+            "corridor_s": 0.0594,
+            "safety_total_s": 0.0993,
+            "clean_guidance_s": 0.0626,
+            "guided_diffusion_s": 0.3216,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0078,
+            "total_s": 0.8245
+          },
+          "inference_s": 0.8267194000072777
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.375,
+          "length_m": 23.347690586706847,
+          "mean_curvature": 0.09700247525090609,
+          "max_curvature": 2.4553272075615693,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.6007239297032356,
+          "corridor_violation_local_m": 0.6007239297032356,
+          "step_violation_m": {
+            "mean": 0.6007239297032356,
+            "max": 0.6007239297032356,
+            "min": 0.6007239297032356,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.601067799788255,
+            "max": 0.6096692085266113,
+            "min": 0.6007237434387207,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.6007237434387207,
+            "max": 0.6007237434387207,
+            "min": 0.6007237434387207,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999770751366,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.001541855122643308,
+            "max": 0.0015486732590943575,
+            "min": 0.0015359856188297272,
+            "n": 26
+          },
+          "final_qp_status": [
+            "primal infeasible"
+          ],
+          "final_qp_iterations": [
+            325
+          ],
+          "final_qp_time_s": 0.022563800000000002,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.6007237434387207,
+          "timing_s": {
+            "map_encode_s": 0.0075,
+            "initial_diffusion_s": 0.2457,
+            "search_s": 0.0146,
+            "ellipse_s": 0.0266,
+            "corridor_s": 0.0619,
+            "safety_total_s": 0.1044,
+            "clean_guidance_s": 0.0605,
+            "guided_diffusion_s": 0.308,
+            "final_projection_s": 0.0373,
+            "final_validation_s": 0.0074,
+            "total_s": 0.8574
+          },
+          "inference_s": 0.8596254999865778
+        }
+      }
+    },
+    {
+      "index": 10,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": false,
+          "corridor_certified": false,
+          "collision_rate": 0.267449613724636,
+          "min_clearance_m": -1.379179564249649,
+          "length_m": 30.830478729851812,
+          "mean_curvature": 0.13697949696060685,
+          "max_curvature": 2.0238112325282693,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 1.9256885235126202e-07,
+            "max": 9.5367431640625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0046,
+            "initial_diffusion_s": 0.2228,
+            "search_s": 0.0136,
+            "ellipse_s": 0.0248,
+            "corridor_s": 0.1026,
+            "safety_total_s": 0.1421,
+            "clean_guidance_s": 0.0282,
+            "guided_diffusion_s": 0.309,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0072,
+            "total_s": 0.8031
+          },
+          "inference_s": 0.8050230999942869
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": false,
+          "corridor_certified": false,
+          "collision_rate": 0.267449613724636,
+          "min_clearance_m": -1.379179564249649,
+          "length_m": 30.830478729851812,
+          "mean_curvature": 0.13697949696060685,
+          "max_curvature": 2.0238112325282693,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 1.9256885235126202e-07,
+            "max": 9.5367431640625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "no_constraints"
+          ],
+          "final_qp_iterations": [
+            0
+          ],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0078,
+            "initial_diffusion_s": 0.2386,
+            "search_s": 0.015,
+            "ellipse_s": 0.0261,
+            "corridor_s": 0.0993,
+            "safety_total_s": 0.1417,
+            "clean_guidance_s": 0.0277,
+            "guided_diffusion_s": 0.3047,
+            "final_projection_s": 0.0006,
+            "final_validation_s": 0.0081,
+            "total_s": 0.817
+          },
+          "inference_s": 0.820396900002379
+        }
+      }
+    },
+    {
+      "index": 11,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.2053448523605341,
+          "length_m": 24.846241298292167,
+          "mean_curvature": 0.06972509862818964,
+          "max_curvature": 0.7162470039582697,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.4463040488804074,
+            "max": 0.9442101761285926,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0361632567185622,
+            "max": 0.9402446746826172,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.027249629680926982,
+            "max": 0.7084903717041016,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.009615384615384616,
+            "max": 0.25,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.00011664668384652871,
+            "max": 0.0030328137800097466,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0057,
+            "initial_diffusion_s": 0.2575,
+            "search_s": 0.013,
+            "ellipse_s": 0.022,
+            "corridor_s": 0.0481,
+            "safety_total_s": 0.0843,
+            "clean_guidance_s": 0.058,
+            "guided_diffusion_s": 0.2559,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0075,
+            "total_s": 0.7589
+          },
+          "inference_s": 0.7609589999774471
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 1.2053448523605341,
+          "length_m": 24.846241298292167,
+          "mean_curvature": 0.06972509862818964,
+          "max_curvature": 0.7162470039582697,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.4463040488804074,
+            "max": 0.9442101761285926,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0361632567185622,
+            "max": 0.9402446746826172,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.027249629680926982,
+            "max": 0.7084903717041016,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.009615384615384616,
+            "max": 0.25,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.00011664668384652871,
+            "max": 0.0030328137800097466,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0077395,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0068,
+            "initial_diffusion_s": 0.2414,
+            "search_s": 0.0131,
+            "ellipse_s": 0.023,
+            "corridor_s": 0.0519,
+            "safety_total_s": 0.0892,
+            "clean_guidance_s": 0.0692,
+            "guided_diffusion_s": 0.32,
+            "final_projection_s": 0.0215,
+            "final_validation_s": 0.0081,
+            "total_s": 0.8455
+          },
+          "inference_s": 0.848230900010094
+        }
+      }
+    },
+    {
+      "index": 12,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.6161346435546875,
+          "length_m": 34.565892617368405,
+          "mean_curvature": 0.05659617034819754,
+          "max_curvature": 1.2648879287468575,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.05277741352441325,
+            "max": 0.1357564722665856,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0034702007587139425,
+            "max": 0.0902252197265625,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.007848581442466149,
+            "max": 0.20406311750411987,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 4.906015685544564e-05,
+            "max": 0.0012755640782415867,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0049,
+            "initial_diffusion_s": 0.2565,
+            "search_s": 0.0127,
+            "ellipse_s": 0.0271,
+            "corridor_s": 0.0585,
+            "safety_total_s": 0.0995,
+            "clean_guidance_s": 0.0694,
+            "guided_diffusion_s": 0.3003,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0077,
+            "total_s": 0.8327
+          },
+          "inference_s": 0.8347483999677934
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.6161346435546875,
+          "length_m": 34.565892617368405,
+          "mean_curvature": 0.05659617034819754,
+          "max_curvature": 1.2648879287468575,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.05277741352441325,
+            "max": 0.1357564722665856,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0034702007587139425,
+            "max": 0.0902252197265625,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.007848581442466149,
+            "max": 0.20406311750411987,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 4.906015685544564e-05,
+            "max": 0.0012755640782415867,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0088114,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0068,
+            "initial_diffusion_s": 0.2154,
+            "search_s": 0.013,
+            "ellipse_s": 0.0258,
+            "corridor_s": 0.0505,
+            "safety_total_s": 0.0905,
+            "clean_guidance_s": 0.0616,
+            "guided_diffusion_s": 0.2815,
+            "final_projection_s": 0.0225,
+            "final_validation_s": 0.008,
+            "total_s": 0.7683
+          },
+          "inference_s": 0.7706275999662466
+        }
+      }
+    },
+    {
+      "index": 13,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.4714920264929106,
+          "length_m": 42.17146025439471,
+          "mean_curvature": 0.056773971293025215,
+          "max_curvature": 0.9632879608647361,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.5094098198990196,
+          "corridor_violation_local_m": 0.5094098198990196,
+          "step_violation_m": {
+            "mean": 0.9507910575454003,
+            "max": 1.4634787450637532,
+            "min": 0.4854926233714423,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.8248428931603065,
+            "max": 1.4726142883300781,
+            "min": 0.75323486328125,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.5972433823805589,
+            "max": 1.2396278381347656,
+            "min": 0.5269317626953125,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999770751366,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0014928013014678771,
+            "max": 0.0017086032312363386,
+            "min": 0.0014580213464796543,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.5509414672851562,
+          "timing_s": {
+            "map_encode_s": 0.0056,
+            "initial_diffusion_s": 0.2549,
+            "search_s": 0.0144,
+            "ellipse_s": 0.0226,
+            "corridor_s": 0.0459,
+            "safety_total_s": 0.0842,
+            "clean_guidance_s": 0.0601,
+            "guided_diffusion_s": 0.2687,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0079,
+            "total_s": 0.7687
+          },
+          "inference_s": 0.7708834999939427
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.6744204861241277,
+          "length_m": 42.54379484022433,
+          "mean_curvature": 0.07056358574966086,
+          "max_curvature": 0.9632879608647361,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.9507910575454003,
+            "max": 1.4634787450637532,
+            "min": 0.4854926233714423,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.8248428931603065,
+            "max": 1.4726142883300781,
+            "min": 0.75323486328125,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.5972433823805589,
+            "max": 1.2396278381347656,
+            "min": 0.5269317626953125,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999770751366,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0014928013014678771,
+            "max": 0.0017086032312363386,
+            "min": 0.0014580213464796543,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            175
+          ],
+          "final_qp_time_s": 0.012811800000000002,
+          "final_projection_correction_m": 0.6051477789878845,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0057,
+            "initial_diffusion_s": 0.2223,
+            "search_s": 0.0137,
+            "ellipse_s": 0.0225,
+            "corridor_s": 0.0454,
+            "safety_total_s": 0.0828,
+            "clean_guidance_s": 0.0606,
+            "guided_diffusion_s": 0.2887,
+            "final_projection_s": 0.027,
+            "final_validation_s": 0.0086,
+            "total_s": 0.7844
+          },
+          "inference_s": 0.7872992000193335
+        }
+      }
+    },
+    {
+      "index": 14,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.6655694246292114,
+          "length_m": 21.37917711704872,
+          "mean_curvature": 0.0523479630390833,
+          "max_curvature": 1.4694516928210226,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 1.994463113638071e-07,
+            "max": 4.76837158203125e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0056,
+            "initial_diffusion_s": 0.2199,
+            "search_s": 0.0156,
+            "ellipse_s": 0.0266,
+            "corridor_s": 0.0578,
+            "safety_total_s": 0.102,
+            "clean_guidance_s": 0.0704,
+            "guided_diffusion_s": 0.3008,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0071,
+            "total_s": 0.7925
+          },
+          "inference_s": 0.7946254999842495
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.6655694246292114,
+          "length_m": 21.37917711704872,
+          "mean_curvature": 0.0523479630390833,
+          "max_curvature": 1.4694516928210226,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 1.994463113638071e-07,
+            "max": 4.76837158203125e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            125
+          ],
+          "final_qp_time_s": 0.0119623,
+          "final_projection_correction_m": 5.960464477539063e-08,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2381,
+            "search_s": 0.0138,
+            "ellipse_s": 0.0271,
+            "corridor_s": 0.0555,
+            "safety_total_s": 0.0975,
+            "clean_guidance_s": 0.0598,
+            "guided_diffusion_s": 0.2846,
+            "final_projection_s": 0.0269,
+            "final_validation_s": 0.008,
+            "total_s": 0.8032
+          },
+          "inference_s": 0.8057862999849021
+        }
+      }
+    },
+    {
+      "index": 15,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 4.85621452331543,
+          "length_m": 15.560014704368372,
+          "mean_curvature": 0.08282427378298596,
+          "max_curvature": 2.006059299460173,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 3.2094808725210335e-08,
+            "max": 1.1920928955078125e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2357,
+            "search_s": 0.013,
+            "ellipse_s": 0.0295,
+            "corridor_s": 0.0486,
+            "safety_total_s": 0.0923,
+            "clean_guidance_s": 0.0604,
+            "guided_diffusion_s": 0.2797,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0079,
+            "total_s": 0.7648
+          },
+          "inference_s": 0.7669429000234231
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 4.85621452331543,
+          "length_m": 15.560014704368372,
+          "mean_curvature": 0.08282427378298596,
+          "max_curvature": 2.006059299460173,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 3.2094808725210335e-08,
+            "max": 1.1920928955078125e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0106494,
+          "final_projection_correction_m": 5.960464477539063e-08,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0078,
+            "initial_diffusion_s": 0.2164,
+            "search_s": 0.0118,
+            "ellipse_s": 0.0284,
+            "corridor_s": 0.0501,
+            "safety_total_s": 0.0914,
+            "clean_guidance_s": 0.0594,
+            "guided_diffusion_s": 0.289,
+            "final_projection_s": 0.0276,
+            "final_validation_s": 0.0084,
+            "total_s": 0.783
+          },
+          "inference_s": 0.7871444000047632
+        }
+      }
+    },
+    {
+      "index": 16,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": false,
+          "corridor_certified": false,
+          "collision_rate": 0.00045041765022748475,
+          "min_clearance_m": 0.02989326255672471,
+          "length_m": 45.35544750705781,
+          "mean_curvature": 0.057366302534142474,
+          "max_curvature": 0.2855103403107593,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.01978234015405178,
+          "corridor_violation_full_m": 1.4709668595060066,
+          "corridor_violation_local_m": 1.4709668595060066,
+          "step_violation_m": {
+            "mean": 2.6872749682443766,
+            "max": 3.9804621131312246,
+            "min": 1.4616402341732737,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 1.8893618400280292,
+            "max": 4.063243865966797,
+            "min": 1.7626047134399414,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 1.7251446430499737,
+            "max": 3.9090795516967773,
+            "min": 1.6035823822021484,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999942687842,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0016257687865828092,
+            "max": 0.0019969376735389233,
+            "min": 0.0015615402953699231,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 1.623155117034912,
+          "timing_s": {
+            "map_encode_s": 0.0059,
+            "initial_diffusion_s": 0.2178,
+            "search_s": 0.0147,
+            "ellipse_s": 0.0248,
+            "corridor_s": 0.0758,
+            "safety_total_s": 0.1175,
+            "clean_guidance_s": 0.0652,
+            "guided_diffusion_s": 0.2918,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0078,
+            "total_s": 0.7908
+          },
+          "inference_s": 0.7933511000010185
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.6073413497171933,
+          "length_m": 47.05604729754131,
+          "mean_curvature": 0.206079157612968,
+          "max_curvature": 3.8672890149911914,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.01978234015405178,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 2.6872749682443766,
+            "max": 3.9804621131312246,
+            "min": 1.4616402341732737,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 1.8893618400280292,
+            "max": 4.063243865966797,
+            "min": 1.7626047134399414,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 1.7251446430499737,
+            "max": 3.9090795516967773,
+            "min": 1.6035823822021484,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.24999999942687842,
+            "max": 0.25,
+            "min": 0.2499999850988388,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0016257687865828092,
+            "max": 0.0019969376735389233,
+            "min": 0.0015615402953699231,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            250
+          ],
+          "final_qp_time_s": 0.0183871,
+          "final_projection_correction_m": 1.9700047969818115,
+          "final_corridor_violation_m": 0.00052642822265625,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2186,
+            "search_s": 0.0146,
+            "ellipse_s": 0.0238,
+            "corridor_s": 0.0594,
+            "safety_total_s": 0.0995,
+            "clean_guidance_s": 0.0585,
+            "guided_diffusion_s": 0.3088,
+            "final_projection_s": 0.0324,
+            "final_validation_s": 0.0089,
+            "total_s": 0.8145
+          },
+          "inference_s": 0.8173181000165641
+        }
+      }
+    },
+    {
+      "index": 17,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.688385009765625,
+          "length_m": 36.50682595620636,
+          "mean_curvature": 0.08604845741849994,
+          "max_curvature": 0.4752349938032676,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.417755356429409,
+            "max": 0.9086260517071878,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.13579089824969953,
+            "max": 0.9043865203857422,
+            "min": 0.02941131591796875,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.026558582599346455,
+            "max": 0.6905231475830078,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.20243446586223748,
+            "max": 0.25,
+            "min": 0.08297157287597656,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0012834759523124935,
+            "max": 0.0017457820940762758,
+            "min": 0.00042067619506269693,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2668,
+            "search_s": 0.0159,
+            "ellipse_s": 0.0285,
+            "corridor_s": 0.0551,
+            "safety_total_s": 0.1008,
+            "clean_guidance_s": 0.0632,
+            "guided_diffusion_s": 0.2886,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0074,
+            "total_s": 0.8243
+          },
+          "inference_s": 0.8263539000181481
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.688385009765625,
+          "length_m": 36.50682595620636,
+          "mean_curvature": 0.08604845741849994,
+          "max_curvature": 0.4752349938032676,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.417755356429409,
+            "max": 0.9086260517071878,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.13579089824969953,
+            "max": 0.9043865203857422,
+            "min": 0.02941131591796875,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.026558582599346455,
+            "max": 0.6905231475830078,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.20243446586223748,
+            "max": 0.25,
+            "min": 0.08297157287597656,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0012834759523124935,
+            "max": 0.0017457820940762758,
+            "min": 0.00042067619506269693,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            100
+          ],
+          "final_qp_time_s": 0.010615,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0049,
+            "initial_diffusion_s": 0.197,
+            "search_s": 0.013,
+            "ellipse_s": 0.0241,
+            "corridor_s": 0.0561,
+            "safety_total_s": 0.0943,
+            "clean_guidance_s": 0.0627,
+            "guided_diffusion_s": 0.2744,
+            "final_projection_s": 0.0255,
+            "final_validation_s": 0.0084,
+            "total_s": 0.7479
+          },
+          "inference_s": 0.7505816000048071
+        }
+      }
+    },
+    {
+      "index": 18,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": true,
+          "corridor_certified": false,
+          "collision_rate": 0.0,
+          "min_clearance_m": 6.204494476318359,
+          "length_m": 12.866449548028493,
+          "mean_curvature": 0.05409235046812495,
+          "max_curvature": 0.4878798206639079,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 2.567584698016827e-07,
+            "max": 9.5367431640625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2217,
+            "search_s": 0.013,
+            "ellipse_s": 0.0268,
+            "corridor_s": 0.0598,
+            "safety_total_s": 0.1007,
+            "clean_guidance_s": 0.0659,
+            "guided_diffusion_s": 0.2979,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0082,
+            "total_s": 0.7901
+          },
+          "inference_s": 0.7927153999917209
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 6.204494476318359,
+          "length_m": 12.866449548028493,
+          "mean_curvature": 0.05409235046812495,
+          "max_curvature": 0.4878798206639079,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.0,
+          "corridor_violation_local_m": 0.0,
+          "step_violation_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 2.567584698016827e-07,
+            "max": 9.5367431640625e-07,
+            "min": 0.0,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            75
+          ],
+          "final_qp_time_s": 0.0102247,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.0,
+          "timing_s": {
+            "map_encode_s": 0.0047,
+            "initial_diffusion_s": 0.2181,
+            "search_s": 0.0128,
+            "ellipse_s": 0.0294,
+            "corridor_s": 0.0523,
+            "safety_total_s": 0.0967,
+            "clean_guidance_s": 0.0664,
+            "guided_diffusion_s": 0.2887,
+            "final_projection_s": 0.0249,
+            "final_validation_s": 0.0071,
+            "total_s": 0.7916
+          },
+          "inference_s": 0.7939098000060767
+        }
+      }
+    },
+    {
+      "index": 19,
+      "shared_pack_across_conditioned_groups": true,
+      "groups": {
+        "cpcg_no_projection": {
+          "group": "cpcg_no_projection",
+          "valid": false,
+          "corridor_certified": false,
+          "collision_rate": 0.015539064564670848,
+          "min_clearance_m": -0.13706541234084033,
+          "length_m": 33.83977776677694,
+          "mean_curvature": 0.08663496770945421,
+          "max_curvature": 1.0430432609384226,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 0.74825098294491,
+          "corridor_violation_local_m": 0.74825098294491,
+          "step_violation_m": {
+            "mean": 1.9722842857087846,
+            "max": 3.234755864275229,
+            "min": 0.7039267879519855,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 1.0911891460418701,
+            "max": 3.2001943588256836,
+            "min": 0.9469842910766602,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.8671686099125788,
+            "max": 2.9548354148864746,
+            "min": 0.7230644226074219,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.25,
+            "max": 0.25,
+            "min": 0.25,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0026482319942890452,
+            "max": 0.0028722446877509356,
+            "min": 0.002614771481603384,
+            "n": 26
+          },
+          "final_qp_status": [],
+          "final_qp_iterations": [],
+          "final_qp_time_s": 0.0,
+          "final_projection_correction_m": 0.0,
+          "final_corridor_violation_m": 0.7676734924316406,
+          "timing_s": {
+            "map_encode_s": 0.0053,
+            "initial_diffusion_s": 0.2277,
+            "search_s": 0.0152,
+            "ellipse_s": 0.0211,
+            "corridor_s": 0.0519,
+            "safety_total_s": 0.0893,
+            "clean_guidance_s": 0.0634,
+            "guided_diffusion_s": 0.3109,
+            "final_projection_s": 0.0,
+            "final_validation_s": 0.0073,
+            "total_s": 0.7887
+          },
+          "inference_s": 0.7912415000027977
+        },
+        "cpcg_full": {
+          "group": "cpcg_full",
+          "valid": true,
+          "corridor_certified": true,
+          "collision_rate": 0.0,
+          "min_clearance_m": 0.5303124297597785,
+          "length_m": 34.9871946948426,
+          "mean_curvature": 0.22931848018521464,
+          "max_curvature": 2.1543687701919567,
+          "endpoint_error_scene": 0.0,
+          "heading_error_max_deg": 0.0,
+          "corridor_violation_full_m": 2.3355191842711065e-06,
+          "corridor_violation_local_m": 2.3355191842711065e-06,
+          "step_violation_m": {
+            "mean": 1.9722842857087846,
+            "max": 3.234755864275229,
+            "min": 0.7039267879519855,
+            "n": 50
+          },
+          "guidance_steps": 26,
+          "guidance_max_violation_before_m": {
+            "mean": 1.0911891460418701,
+            "max": 3.2001943588256836,
+            "min": 0.9469842910766602,
+            "n": 26
+          },
+          "guidance_max_violation_after_m": {
+            "mean": 0.8671686099125788,
+            "max": 2.9548354148864746,
+            "min": 0.7230644226074219,
+            "n": 26
+          },
+          "guidance_delta_max_m": {
+            "mean": 0.25,
+            "max": 0.25,
+            "min": 0.25,
+            "n": 26
+          },
+          "guidance_delta_rms_scene": {
+            "mean": 0.0026482319942890452,
+            "max": 0.0028722446877509356,
+            "min": 0.002614771481603384,
+            "n": 26
+          },
+          "final_qp_status": [
+            "solved"
+          ],
+          "final_qp_iterations": [
+            525
+          ],
+          "final_qp_time_s": 0.034170400000000004,
+          "final_projection_correction_m": 0.865300178527832,
+          "final_corridor_violation_m": 0.0004177093505859375,
+          "timing_s": {
+            "map_encode_s": 0.0055,
+            "initial_diffusion_s": 0.2115,
+            "search_s": 0.0145,
+            "ellipse_s": 0.0207,
+            "corridor_s": 0.0507,
+            "safety_total_s": 0.0871,
+            "clean_guidance_s": 0.0656,
+            "guided_diffusion_s": 0.2833,
+            "final_projection_s": 0.0487,
+            "final_validation_s": 0.0084,
+            "total_s": 0.7925
+          },
+          "inference_s": 0.7953443000442348
+        }
+      }
+    }
+  ],
+  "aggregate": {
+    "cpcg_full": {
+      "scenes": 20,
+      "collision_rate": 0.0133724806862318,
+      "collision_free_scenes": 19,
+      "min_clearance_m": 1.3960581399342686,
+      "step_violation_mean_m": 0.5310488646141324,
+      "step_violation_max_m": 0.7942741769156803,
+      "final_violation_m": 0.07111869035028225,
+      "guidance_steps_mean": 26.0,
+      "qp_solved_scenes": 17,
+      "certified_scenes": 17,
+      "projection_correction_m": 0.7169314362108707,
+      "inference_s": 0.8145948400051566
+    },
+    "cpcg_no_projection": {
+      "scenes": 20,
+      "collision_rate": 0.02106286249851779,
+      "collision_free_scenes": 16,
+      "min_clearance_m": 1.2539468310487512,
+      "step_violation_mean_m": 0.5310488646141324,
+      "step_violation_max_m": 0.7942741769156803,
+      "final_violation_m": 0.3088029484390846,
+      "guidance_steps_mean": 26.0,
+      "qp_solved_scenes": 0,
+      "certified_scenes": 0,
+      "projection_correction_m": null,
+      "inference_s": 0.8205091500014532
+    }
+  }
+}

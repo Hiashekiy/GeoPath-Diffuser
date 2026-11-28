@@ -12,6 +12,12 @@
 正在后台跑。核心实测结论：**无安全支路（Map-only）的输出实质是一次"以地图为条件的均值预测"，
 它作为"引导路径生成器"足够用（2 步去噪 = 50 步），但**不能**单独作为安全轨迹使用。
 
+**最新一轮（CPCG）**：推理期修正已从 ALM 换成 **Clean-Prediction Constraint Guidance + 一次末端凸 QP**。
+每步只对**网络预测的干净控制点**算走廊半空间的解析梯度（masked squared hinge，只按当前违反面归一化），
+经 Trust Region 与 BoundaryDecoder 保持端点/朝向，然后作为 `q0_used` 进入**原样未改**的 DDIM 更新；
+全部反向步结束后做一次 OSQP 凸投影，再做 512 点密集碰撞验证。训练目标、网络结构、数据集、
+搜索/椭圆/走廊构建算法本轮**未改**。报告见 `docs/cpcg_report.md`。
+
 ---
 
 ## 1. 环境与运行约定（非常重要）
@@ -20,6 +26,7 @@
 |---|---|
 | Python | `E:\CondaEnvData\envs\GGMPC\python.exe`（**必须用它**；系统默认 python 是 3.14，`import torch` 会 DLL 报错） |
 | torch | 2.9.1+cu126，CUDA 可用 |
+| osqp | 1.1.0（末端凸 QP 的求解器；**必需**，缺失时 `safety/qp_projection.py` 会明确报错而不是退回 ALM） |
 | GPU | RTX 4070，12,282 MiB（单次训练占用 5.6–8.2 GB，**不能并行跑两个 16-batch 训练**） |
 | 项目根 | `D:\ProjectDirectory\GeoPath-Diffuser` |
 | 磁盘 | D: 约 28 GB 空闲（每个含优化器状态的 `last.pt` 约 637 MB，纯权重 212 MB） |
@@ -28,7 +35,8 @@
 
 ```powershell
 $py = "E:\CondaEnvData\envs\GGMPC\python.exe"
-& $py -m pytest tests -q            # 当前：103 passed, 1 skipped
+& $py -m pytest tests -q            # 当前：140 passed, 1 skipped（另 2 个 tmp_path 用例受本机沙箱限制）
+& $py scripts\run_inference.py --dataset real --config configs/c64_longpath.yaml --samples 8 --modes map_only,safety_only,cpcg --checkpoint <ckpt>
 ```
 
 **已知坑**
@@ -52,7 +60,9 @@ $py = "E:\CondaEnvData\envs\GGMPC\python.exe"
 3. 主干必须是**标准 Conditional DiT-S**：D=384、12 block、6 head、mlp_ratio 4、AdaLN-Zero、x0 预测
    （55,662,350 可训练参数；frozen encoders 3,157,168 / 0 trainable）。
 4. **单阶段同步双支路联合训练**：同一 `q_t / t`，两次前向，**一次**反向、一次更新。
-5. ALM / 凸区域 / B-spline / DDIM 复用 TrajSafe 的做法；安全几何只在中间步生成**一次**。
+5. 凸区域 / B-spline / DDIM 复用 TrajSafe 的做法；安全几何只在中间步生成**一次**。
+   **推理期修正已从 ALM 换成 CPCG（干净预测的解析约束梯度）+ 一次末端凸 QP**；
+   `diffusion/bspline_alm.py` 只作历史/对照保留，活动链路不 import 它。
 6. 场景帧：256×256 @ 0.25 m = 64 m；`SceneTransform(64,256)`；轨迹状态在 `[-1,1]^2` 场景坐标。
 
 ---
@@ -83,8 +93,14 @@ src/gp_diffuser/
   models/condition_encoders.py   MapConditionEncoder（双适配器 + 残差融合 → 1024 token）+ SafetyConditionEncoder(64 椭圆 token)
   training/dual_branch_trainer.py 双支路训练器；开关：use_safety / u_target / align_space；续训 start_epoch
   training/losses.py             损失集（见 §5）；DEFAULT_LOSS_WEIGHTS 含 lambda_safe_u（默认 0）
-  diffusion/sampler_conditional_dit.py  DDIM + 中间步一次性生成安全几何 + ALM；
-                                 safety_mode ∈ {full, no_alm, map_only}；record_curves 记录每步 x0
+  diffusion/sampler_conditional_dit.py  DDIM + 中间步一次性生成安全几何 + CPCG + 末端 QP；
+                                 safety_mode ∈ {map_only, safety_only, cpcg}
+                                 （旧别名 no_alm → safety_only、full → cpcg）；
+                                 record_curves 记录每步 x0_pred / x0_guided，末尾 x0_projected
+  diffusion/clean_guidance.py     CPCG：masked squared-hinge 安全代价 + 解析梯度 + Trust Region
+                                 （不对 DiT 反传，不需要 autograd）
+  diffusion/bspline_alm.py        历史/对照模块（ALM），活动推理链路已不再调用
+  safety/qp_projection.py         末端凸 QP（OSQP）：pack → 稀疏 A x ≤ b + 端点/朝向行，逐样本求解
   safety/, guidance/, vendor/    走廊/凸区域/椭圆/引导搜索（vendored 上游代码）
 scripts/
   train_dual_branch.py           训练入口（--dataset real --no-safety --u-target --align-space
@@ -94,8 +110,11 @@ scripts/
   visualize_prediction.py        单场景：安全几何 / 每步 x0 面板（--safety-mode，--ncols）
   visualize_map_only_evolution.py 一次前向到收敛的 EVERY-step x0（三联图 + 逐 step 位移统计）
   evaluate_real.py, reproduce_pathsafe_eval.py, test_vendored_modules.py, smoke_pipeline.py,
+  verify_corridor_equivalence.py（走廊配置迁移等价性）, diag_regions_and_alm.py（区域 + CPCG 轨迹诊断），
   audit/prepare/validate real dataset 系列, octile_* 系列, _probe_alignment.py（对齐机制诊断）
-tests/  103 passed, 1 skipped（含梯度起始点、双支路隔离、无安全臂不污染安全链路等）
+tests/  140 passed, 1 skipped（含解析梯度有限差分、掩码、空 pack、C=32/64、DDIM 一致性、
+        QP 可行/不可行、三模式推理集成；2 个用 tmp_path 的用例在本机沙箱下无法建临时目录，
+        与本轮改动无关，见 docs/cpcg_report.md §3）
 ```
 
 ---
@@ -113,7 +132,9 @@ tests/  103 passed, 1 skipped（含梯度起始点、双支路隔离、无安全
 | `L_safe` | 走廊连续约束 `Aβ ≤ b`：每段 4 个 Bezier 控制点 × 所有面取 relu，逐样本取 **max**，场景单位 | 0.15 |
 | **`L_safe_u`** | **同一走廊约束作用于 Map-only 支路（特权监督，标签而非输入）** | **默认 0（新开关）** |
 
-不含：噪声预测损失（直接 x0 预测）、SDF/碰撞项、地图一致性项、多样性/熵项。ALM 只是推理期投影。
+不含：噪声预测损失（直接 x0 预测）、SDF/碰撞项、地图一致性项、多样性/熵项。
+推理期的 CPCG 用同一套 Bezier 凸包约束语义，但代价形式是 masked squared hinge（只对**当前违反**的有效面归一化），
+末端再补一次凸 QP；训练侧这一轮完全没动。
 
 ---
 
@@ -388,7 +409,16 @@ $common = @("--config","configs/c64_longpath.yaml","--dataset","real",
   `tests/test_dual_branch_training.py`（+4 个测试）。
 - 新增未跟踪：`scripts/{compare_safety_ablation,visualize_map_only_evolution,_probe_alignment}.py`、
   `docs/{ablation_safety_map_only,ablation_branch_transfer}.md`、`outputs/reports/*`、`outputs/figures/*`。
-- 测试：**103 passed, 1 skipped**（最后确认 12:25）。
+- **本轮（CPCG）未提交改动**：新增 `src/gp_diffuser/diffusion/clean_guidance.py`、
+  `src/gp_diffuser/safety/qp_projection.py`、`scripts/verify_corridor_equivalence.py`、
+  `tests/{test_clean_guidance,test_qp_projection}.py`、`docs/cpcg_report.md`；
+  修改 `diffusion/sampler_conditional_dit.py`（ALM → CPCG + 末端 QP，模式改名，trace/统计字段）、
+  `configs/default.yaml`（`clean_guidance` / `final_projection`，走廊几何参数归位 `corridor`）、
+  `evaluation/visualize.py`（三条曲线 + Bezier 分段）、`scripts/*`（`alm_stats` → `guidance_stats` /
+  `final_qp_*`）、`tests/{test_inference_pipeline,test_review_regressions,test_network_structure}.py`、
+  `README.md`、本文件。
+- 测试：**140 passed, 1 skipped**（另 2 个 `tmp_path` 用例在本机沙箱下 pytest 无法创建临时目录，
+  与本轮改动无关，见 `docs/cpcg_report.md` §3）。
 
 ---
 
@@ -397,6 +427,7 @@ $common = @("--config","configs/c64_longpath.yaml","--dataset","real",
 | 目的 | 路径 |
 |---|---|
 | 设计文档 | `docs/安全条件扩散轨迹规划方案_Conditional-DiT网络修正版.md` |
+| **本轮 CPCG + 末端 QP 实施与验收报告** | `docs/cpcg_report.md` |
 | 数据集构建报告 | `docs/dataset_v1_report.md` |
 | 第一轮 A/B（安全训练 vs 无安全训练） | `docs/ablation_safety_map_only.md` |
 | 四臂监督机制消融（含续训计划） | `docs/ablation_branch_transfer.md` |

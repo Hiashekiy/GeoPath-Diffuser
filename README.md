@@ -7,7 +7,7 @@
 * **PathSafe-EllipseNet 已训练的两个 ResUNet 的 `enc3` 瓶颈特征**（冻结，只编码一次）；
 * 起终点 / 朝向；
 * 由 Astar-Diffusion 引导场搜索出的**单条路径** + PathSafe 预测的 **64 个椭圆**；
-* 由搜索路径与障碍物构建的**局部凸安全区域**，通过 **ALM** 在推理时做硬约束修正。
+* 由搜索路径与障碍物构建的**局部凸安全区域**，通过 **CPCG（基于干净轨迹预测的约束梯度引导）+ 末端凸 QP** 在推理时修正。
 
 设计依据：`docs/安全条件扩散轨迹规划方案_Conditional-DiT网络修正版.md`。
 
@@ -39,14 +39,21 @@ Q_T ~ N(0,I) ──→ Map-only DDIM 前段 ──→ 初始全局引导轨迹
         Map-only 分支：只用 Map Context；安全分支：每层额外一条
         Safety Cross-Attention（独立参数 + 可学习门控 α_l，初始 0.1）
                                                   │
-                          每步 ALM：min ‖Q−Q_raw‖² + λs·L_smooth   s.t. A_jE_{l,r}Q ≤ b_j
+                          每步 CPCG：q0_guided = q0 − η·∇_q0 J_corridor(q0)
+                          （解析梯度：不反传 DiT，Trust Region 限幅，端点/朝向保持）
                                                   │
-                                      DDIM 状态更新 → 最终控制点 → 128 点轨迹
+                                       DDIM 状态更新（q0_used = q0_guided）
                                                   │
-                                     密集碰撞验证（512 点）
+                        全部反向步结束 → 一次末端凸 QP（OSQP）：min ‖Q−Q_guided‖²
+                                          s.t. A_jE_{l,r}Q ≤ b_j, Q_0=S, Q_{C−1}=G
+                                                  │
+                                      最终控制点 → 128 点轨迹
+                                                  │
+                                     密集碰撞验证（512 点，在 QP 之后）
 ```
 
-* **没有历史反馈**：ALM 结果只进入当前 DDIM 状态更新，不编码、不缓存、不回灌网络。
+* **没有历史反馈**：CPCG 的干净预测修正只进入当前 DDIM 状态更新（`q0_used`），不编码、不缓存、不回灌网络，也不增加模型前向次数。
+* **不用 ALM**：`diffusion/bspline_alm.py` 仅作历史/对照保留，活动推理链路不再 import 它；对带噪状态不施加碰撞半空间，也不对 DiT 反传。
 * **不重复昂贵操作**：搜索 / 椭圆 / 走廊各只做一次，后续反向步复用同一个 pack（测试断言了对象同一性）。
 
 ### 训练（单阶段双路联合，一次反向）
@@ -74,14 +81,15 @@ src/gp_diffuser/
   map_encoder/           resunet.py（迁移）、frozen_encoder.py
   guidance/              Astar-Diffusion 全量迁移 + search.py 适配层
   safety/                psenet.py sampling.py convex_region.py safety_corridor.py bspline_constraints.py（迁移）
-                         safety_features.py psenet_inputs.py local_regions.py（新写）
+                         safety_features.py psenet_inputs.py local_regions.py qp_projection.py（新写）
   trajectory/            bspline.py（迁移）、dense_path.py
-  diffusion/             schedule.py bspline_alm.py（迁移）、sampler_conditional_dit.py（新写）
+  diffusion/             schedule.py sampler_conditional_dit.py clean_guidance.py（新写）
+                         bspline_alm.py（历史/对照，不在活动链路）
   models/                conditional_dit.py condition_encoders.py（新写）
   training/              dataset.py safety_cache.py losses.py dual_branch_trainer.py
   evaluation/            metrics.py visualize.py
 scripts/                 audit / cache / fit-study / smoke / train / inference
-tests/                   56 个 pytest 用例
+tests/                   pytest 用例（含 clean_guidance / qp_projection / 推理集成）
 docs/                    reference_code_audit.md module_provenance.md design_review.md acceptance_report.md
 outputs/                 figures/ reports/ cache/ checkpoints/（运行产物）
 ```
@@ -138,9 +146,14 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 # 4) 双路联合训练（烟测；正式训练请自己加 epochs/数据量）
 & $py scripts\train_dual_branch.py --steps 60 --epochs 4 --size 16 --save outputs/checkpoints/toy.pt
 
-# 5) 推理 + 三配置对照 + 出图（碰撞率 / 朝向误差 / 走廊违反 / ALM 接受-拒绝）
+# 5) 推理 + 三配置对照 + 出图（碰撞率 / 朝向误差 / 走廊违反 / CPCG 每步违反量 / 末端 QP）
 #    仓库不附带任何权重；--checkpoint 指向第 4 步自己产出的文件（可省略 = 随机初始化）
-& $py scripts\run_inference.py --samples 3 --steps 10 --checkpoint outputs/checkpoints/last.pt
+#    默认 8 个执行步（DDIM 子采样，权重不变、不重训）
+& $py scripts\run_inference.py --dataset real --config configs/c64_longpath.yaml \
+        --samples 8 --modes map_only,safety_only,cpcg --checkpoint outputs/checkpoints/last.pt
+
+# 6) 走廊配置迁移等价性（ALM -> corridor，几何必须逐位相同）
+& $py scripts\verify_corridor_equivalence.py --index 2
 ```
 
 缓存文件（`outputs/cache/safety_*.npz`）带指纹（配置子集 + 数据集形状 + checkpoint
@@ -152,15 +165,17 @@ cd D:\ProjectDirectory\GeoPath-Diffuser
 |---|---|---|
 | `map_encoder` | `checkpoint: references/PathSafe-Ellipse/checkpoints/v3_best.pt`，`freeze: true` | 架构从 checkpoint 内嵌 `cfg` 重建，不猜 YAML |
 | `map_condition` | `encoder_type: dual_adapter_residual_fusion`：occ/sdf 各一个 Adapter（Conv1x1+GN16+SiLU）→ concat 384 → 残差空间融合（DW3x3+PW1x1）→ 1024 token | 分辨率始终 32×32；不新增编码器 |
-| `diffusion` | DiT-S：`hidden_dim 384 / depth 12 / num_heads 6 / mlp_ratio 4`，`x0` 预测，`squaredcos_cap_v2`，T=1000 | 与 V5 无关 |
+| `diffusion` | DiT-S：`hidden_dim 384 / depth 12 / num_heads 6 / mlp_ratio 4`，`x0` 预测，`squaredcos_cap_v2`，`train_diffusion_steps 1000`（训练噪声表长度，**权重绑定**；推理步数由 `sampling.steps: 8` 控制） | 与 V5 无关 |
 | `diffusion.condition_fusion` | `separate_map_safety_cross_attention`：每层 SA → Map CA → Safety CA → MLP | Map CA 独立参数/LayerNorm，始终启用；Safety CA 只在安全模式执行 |
 | `diffusion.safety_residual_gate_init` | `0.1`（每层可学习 α_l） | 不额外叠加零初始化门控 |
 | `trajectory` | `degree 3 / num_controls 32 / curve_points 128` | 控制点数是轨迹表示，不是网络深度 |
 | `guidance` | `lam 0.01 / weight linear / policy B3_linear_fusion / alpha 0.25 / path_points 128` | 上游实测最优组合；λ 随地图尺度调整 |
 | `safety_condition` | **仅 64 椭圆** `[cx,cy,a,b,cos2θ,sin2θ]`；`path_tokens: false` | 搜索路径仍用于椭圆中心线/碰撞投影/凸区域，但不进入 Diffusion |
-| `corridor` | `min_overlap_ratio 0.10`、`bridge`、`region.*`、`local.pad_queries 4`、`local.min_queries 8`、`training_scope full` | 数值沿用上游 `config_v5_c32q64.yaml` |
-| `alm` | `rho 5.0 / step_size 0.05 / inner_steps 6 / tol 1e-3 / max_curve_step_scene 0.20 / inherit_dual true / dense_verify 512` | 完全沿用上游，不另设 |
-| `sampling` | `steps 50`、`mid_forward_fraction 0.5` | 安全条件在第 ⌊0.5·(N−1)⌉ 次前向之后生成一次 |
+| `corridor` | `mode trajsafe`、`min_overlap_ratio 0.10`、`bridge`、`region.*`（含 `safety_margin 0.02`）、`constraint_margin_scene 0.0`、`local.*`、`training_scope full` | 几何参数已从 `alm` 解耦（`scripts/verify_corridor_equivalence.py` 证明逐位不变） |
+| `clean_guidance` | `enabled true`、`method analytic_squared_hinge`、`step_size 0.1`、`max_delta_m 0.25`、`margin_scene 0.0` | CPCG：对干净预测的解析梯度步 + Trust Region |
+| `final_projection` | `enabled true`、`solver osqp`、`eps 1e-5`、`max_iter 10000`、`polish true`、`feasibility_tol_scene 1e-4` | 采样结束后一次末端凸 QP |
+| `alm` | `enabled false`（历史/对照，不在活动链路） | 只为 `tests/test_alm.py` 保留 |
+| `sampling` | **`steps 8`**（默认执行 8 个反向步）、`mid_forward_fraction 0.5`、`dense_verify_points 512` | 8 步 = 在训练好的 1000 点噪声表上均匀取 8 个时刻（DDIM 子采样），无需重训；`steps >= train_diffusion_steps` 才是满表 |
 | `loss_weights` | `λu 1.0 / λc 1.0 / λalign 0.5 / λcol 1.0 / λcorr 1.0` | 待验证集调 |
 
 ### 4.1 网络规模（实测，CPU 构建）
@@ -253,7 +268,7 @@ train 915 + val 181 的安全缓存搜索成功率 100%、走廊闭环 86–90%�
 1. **仓库内没有任何 Diffusion 权重**：条件网络结构已变更
    （`conditional_dit_dual_map_fusion_dual_cross_attention_v2`），旧结构 checkpoint 全部作废并已删除；
    正式实验必须从头训练。`scripts/train_dual_branch.py` 只是训练入口。
-2. 冻结 PathSafe 在合成地图上椭圆偏薄（`b` 中位数 0.13 m）→ 走廊闭环率 ≈50 %（上游自身 54 %）；未闭环样本自动退化为"仅地图边界约束"，ALM no-op。
+2. 冻结 PathSafe 在合成地图上椭圆偏薄（`b` 中位数 0.13 m）→ 走廊闭环率 ≈50 %（上游自身 54 %）；未闭环样本自动退化为"仅地图边界约束"：CPCG 的解析代价恒为 0（不做无意义移动），末端 QP 仍会给出结论，但**不会被标记为有走廊安全证书**。
 3. 长路径（>60 m）C=32 拟合误差 0.62 m，建议切 `configs/c64_longpath.yaml`（待确认）。
 4. 训练用走廊是全路径 scope，推理用碰撞区间局部 scope（理由见 `docs/design_review.md` §3.1）。
 5. CPU only。
@@ -265,4 +280,5 @@ train 915 + val 181 的安全缓存搜索成功率 100%、走廊闭环 86–90%�
 | `docs/reference_code_audit.md` | 三个仓库的结构、真实接口、张量形状、依赖、复用决策、缺失模块取证 |
 | `docs/module_provenance.md` | 逐文件迁移表（仓库 / 分支 / commit / 原路径 / 新路径 / 适配 / 是否改算法） |
 | `docs/design_review.md` | 文档内部不一致、文档与代码不一致、需你确认的取舍、与"明确禁止"的逐条对照 |
-| `docs/acceptance_report.md` | 实际测试与实测数字（56 tests、逐阶段耗时、拟合误差、走廊统计、三配置对照） |
+| `docs/acceptance_report.md` | 实际测试与实测数字（pytest 结果、逐阶段耗时、拟合误差、走廊统计、A/B/C/D 配对实验） |
+| `docs/cpcg_report.md` | 本轮 CPCG + 末端 QP 的实施与验收报告（解析梯度校验、QP 诊断、8 步 / 20 场景配对实验） |

@@ -76,19 +76,24 @@
       "detail": ""
     },
     {
-      "check": "corridor scope is local (collision intervals only)",
+      "check": "guidance starts only after the pack exists",
       "ok": true,
-      "detail": "[]"
+      "detail": "6 steps"
     },
     {
-      "check": "ALM skipped because there is no local convex cell",
+      "check": "no network forward is added by CPCG",
       "ok": true,
-      "detail": "local_cells=0"
+      "detail": "10"
     },
     {
-      "check": "every accepted ALM step passed the safety gate",
+      "check": "terminal QP ran exactly once and reported a status",
       "ok": true,
-      "detail": "accepted 0 / rejected 0"
+      "detail": "['solved']"
+    },
+    {
+      "check": "dense validation ran on the projected curve",
+      "ok": true,
+      "detail": "0.0"
     },
     {
       "check": "heading error reported",
@@ -96,7 +101,7 @@
       "detail": "[0.0, 0.0] deg"
     },
     {
-      "check": "ALM never fed back to the network (no feedback key in the trace)",
+      "check": "guidance never fed back to the network (no feedback key in the trace)",
       "ok": true,
       "detail": ""
     },
@@ -111,22 +116,24 @@
     "collision_free": true,
     "collision_intervals": 0,
     "min_clearance_m": 1.5,
-    "mean_clearance_m": 3.3002642558838073,
-    "length_m": 39.06183983556213,
-    "mean_curvature": 17.927012442755057,
-    "max_curvature": 626.8905065870009,
+    "mean_clearance_m": 4.255208064178726,
+    "length_m": 46.46391044072742,
+    "mean_curvature": 29.66865041297141,
+    "max_curvature": 2152.543988933562,
     "end_to_end_distance_m": 34.558826658322765,
-    "num_dense_samples": 891
+    "num_dense_samples": 1018
   },
   "timing": {
-    "map_encode_s": 0.1284546999959275,
-    "initial_diffusion_s": 0.2617805000045337,
-    "search_s": 0.01837489998433739,
-    "ellipse_s": 0.17632980001508258,
-    "corridor_s": 0.000827599986223504,
-    "safety_total_s": 0.21232970000710338,
-    "guided_diffusion_s": 0.15561270000762306,
-    "final_validation_s": 0.007391899998765439,
-    "total_s": 0.7712478000030387
+    "map_encode_s": 0.16237770003499463,
+    "initial_diffusion_s": 0.09720510005718097,
+    "search_s": 0.020145800022874027,
+    "ellipse_s": 0.18703199998708442,
+    "corridor_s": 0.07667229999788105,
+    "safety_total_s": 0.2846919999574311,
+    "clean_guidance_s": 0.008597099978942424,
+    "guided_diffusion_s": 0.09767280000960454,
+    "final_projection_s": 0.14140690001659095,
+    "final_validation_s": 0.009897799987811595,
+    "total_s": 0.8094920000294223
   }
 }
