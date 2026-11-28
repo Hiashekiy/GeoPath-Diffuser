@@ -32,8 +32,9 @@ sampling:
 
 clean_guidance:
   enabled: true
-  step_size: 10.0
+  step_size: 1.0
   max_delta_m: 0.5
+  backtrack_factors: [1.0, 0.5, 0.25, 0.125, 0.0625]
   margin_scene: 0.0
 
 final_projection:

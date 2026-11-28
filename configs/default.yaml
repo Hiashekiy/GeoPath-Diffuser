@@ -121,15 +121,18 @@ corridor:
 # ---------------------------------------------------------------------------
 clean_guidance:                      # CPCG: analytic corridor gradient on q0
   enabled: true
-  method: "analytic_squared_hinge"
-  # MEASURED (20 real test scenes, 8 and 50 executed steps, checkpoint d2_ep100):
-  # the plan's start values (0.1 / 0.25) left the gradient step at mm scale
-  # (count-normalised), so the trust region never bound and CPCG barely moved the
-  # curve.  step_size 10 saturates the per-step gradient; max_delta_m is then the
-  # real knob.  0.5 m = best violation/collision gain per unit of added curvature
-  # (see docs/cpcg_report.md 7).  1.0 m is the safety-first option.
-  step_size: 10.0                    # scales the analytic gradient step
-  max_delta_m: 0.5                   # trust region per control point (metres)
+  method: "analytic_squared_hinge_unormalised"
+  # J(Q) = 0.5 * sum_{valid, violated} relu(g + margin_scene)^2  -- NO division by
+  # the number of violated scalars (that made the cost discontinuous at every
+  # constraint crossing and shrank the step to millimetres).  The update is
+  #   d = -grad J  ->  BoundaryDecoder(Q + step_size*d)  ->  |delta|_max = max_delta_m
+  # followed by a backtracking line search that only accepts a strict decrease of
+  # the same J.  So ``max_delta_m`` is the actual step length per control point,
+  # and ``step_size`` only matters while the raw gradient step is still shorter
+  # than the trust region.
+  step_size: 1.0
+  max_delta_m: 0.5                   # trust region = step length (metres)
+  backtrack_factors: [1.0, 0.5, 0.25, 0.125, 0.0625]
   margin_scene: 0.0                  # corridor.safety_margin already applies
   guide_on_corridor_creation_step: true
   guide_every_step_after_creation: true

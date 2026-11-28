@@ -273,10 +273,12 @@ class ConditionalDiTSampler:
         projection_on = (mode == "cpcg" and bool(proj_cfg.get("enabled", True))
                          and (True if final_projection is None
                               else bool(final_projection)))
-        step_size = float(guide_cfg.get("step_size", 0.1))
+        step_size = float(guide_cfg.get("step_size", 1.0))
         max_delta_scene = (float(guide_cfg.get("max_delta_m", 0.25))
                            / float(self.transform.scale))
         margin_scene = float(guide_cfg.get("margin_scene", 0.0))
+        backtrack = tuple(float(a) for a in guide_cfg.get(
+            "backtrack_factors", (1.0, 0.5, 0.25, 0.125, 0.0625)))
         guide_on_creation = bool(guide_cfg.get("guide_on_corridor_creation_step", True))
         guide_every_step = bool(guide_cfg.get("guide_every_step_after_creation", True))
 
@@ -397,16 +399,19 @@ class ConditionalDiTSampler:
                 q0_used, guide_values = clean_prediction_guidance(
                     pred, pack, self.boundary, start_goal, heading, heading_valid,
                     step_size=step_size, max_delta_scene=max_delta_scene,
-                    margin_scene=margin_scene)
+                    margin_scene=margin_scene, backtrack_factors=backtrack)
                 timing["clean_guidance_s"] = (timing.get("clean_guidance_s", 0.0)
                                               + time.perf_counter() - t0)
                 # eps_guided = eps_pred - sqrt(ab/(1-ab)) * delta, so the implied
                 # noise correction has this norm (reported, never hand-applied)
                 sa_now, s1_now = sqrt_ab[int(t_cur)], sqrt_1ma[int(t_cur)]
                 eps_factor = float(sa_now / s1_now.clamp_min(1e-8))
+                accepted = guide_values["accepted"]
+                accepted_n = int(accepted.sum().item())
                 step_guide = {
                     "safe_loss_before": float(guide_values["safe_loss_before"].mean()),
                     "safe_loss_after": float(guide_values["safe_loss_after"].mean()),
+                    "safe_loss_ratio": float(guide_values["safe_loss_ratio"].mean()),
                     "max_violation_before": float(
                         guide_values["max_violation_before"].mean()),
                     "max_violation_after": float(
@@ -422,6 +427,14 @@ class ConditionalDiTSampler:
                         guide_values["delta_rms_scene"].mean() * eps_factor),
                     "trust_region_scale": float(
                         guide_values["trust_region_scale"].mean()),
+                    "alpha": (float(guide_values["alpha"][accepted].mean())
+                              if accepted_n else 0.0),
+                    "accepted_fraction": float(accepted.to(torch.float32).mean()),
+                    "rejected_fraction": float(
+                        guide_values["rejected"].to(torch.float32).mean()),
+                    "backtrack_trials": float(guide_values["backtrack_trials"].max()),
+                    "accepted_masks": [bool(v) for v in guide_values["accepted"].cpu()],
+                    "rejected_masks": [bool(v) for v in guide_values["rejected"].cpu()],
                     "guidance_applied_masks": [
                         bool(v) for v in guide_values["guidance_applied"].cpu()],
                 }

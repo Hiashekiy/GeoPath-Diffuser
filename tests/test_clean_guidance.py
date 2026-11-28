@@ -6,11 +6,18 @@ import pytest
 import torch
 
 from gp_diffuser.diffusion.clean_guidance import (clean_prediction_guidance,
-                                                constraint_loss_and_grad)
+                                                constraint_loss_and_grad,
+                                                constraint_values)
 from gp_diffuser.diffusion.sampler_conditional_dit import ddim_step
 from gp_diffuser.models.boundary import BoundaryDecoder
 from gp_diffuser.safety.pack_utils import empty_pack, merge_packs
 from gp_diffuser.safety.local_regions import box_cell_faces, pack_from_tables
+
+
+def _raw_squared_hinge(q0: torch.Tensor, pack) -> torch.Tensor:
+    """Independent reference for J: no count division, mask only."""
+    _, raw, valid = constraint_values(q0, pack)
+    return 0.5 * (torch.relu(raw) * valid).square().sum(dim=(1, 2, 3))
 
 
 # --------------------------------------------------------------------------- #
@@ -297,3 +304,164 @@ def test_guidance_only_changes_q0_and_leaves_ddim_untouched(cfg):
     expected = (sqrt_ab[490] * q0_guided + sqrt_1ma[490] * eps_guided)
     assert torch.allclose(b, expected, atol=1e-5)
     assert not torch.allclose(eps_raw, eps_guided)
+
+
+# --------------------------------------------------------------------------- #
+# cost definition: NO violated-count normalisation (review point A / 2)
+# --------------------------------------------------------------------------- #
+def test_cost_is_the_plain_sum_of_violations():
+    codec = _codec(32)
+    pack = _box_pack(codec)
+    q = _violating_controls(32)
+    loss, _, stats = constraint_loss_and_grad(q, pack)
+    reference = _raw_squared_hinge(q, pack)
+    assert torch.allclose(loss, reference, atol=1e-6), \
+        "J must be 0.5*sum(v^2) with no division by the violated count"
+    assert float(stats["violated_count"][0]) > 1, "need many violations to be meaningful"
+
+
+def test_cost_is_continuous_when_a_new_constraint_starts_violating():
+    """Deepening a violation must never LOWER the cost.
+
+    With the retired ``J = 0.5*sum(v^2)/N_viol`` this sweep drops by 41 % at the
+    moment N_viol jumps 48 -> 82 (a second block starts violating) - which is why
+    ``safe_loss_before/after`` could not be used as an acceptance test.  The
+    un-normalised cost rises strictly instead.
+    """
+    codec = _codec(32)
+    pack = _box_pack(codec)
+    depths = [1.0, 1.05, 1.10, 1.15, 1.20, 1.30, 1.45]
+    losses, counts = [], []
+    for depth in depths:
+        q = torch.zeros(1, 32, 2)
+        q[0, 6:12, 0] = 1.45                      # first block, already violating
+        q[0, 20:26, 0] = depth                    # second block, deepening
+        loss, _, stats = constraint_loss_and_grad(q, pack)
+        losses.append(float(loss))
+        counts.append(float(stats["violated_count"][0]))
+    assert max(counts) > min(counts), "the violated count must actually change here"
+    for i in range(len(depths) - 1):
+        assert losses[i + 1] >= losses[i] - 1e-9, (
+            "cost dropped from %.4f to %.4f when the count went %.0f -> %.0f"
+            % (losses[i], losses[i + 1], counts[i], counts[i + 1]))
+    # the normalised variant really is the non-monotone one (regression guard)
+    normalised = [l / c for l, c in zip(losses, counts)]
+    assert min(normalised[1:]) < normalised[0] - 1e-3, \
+        "expected the count-normalised cost to be non-monotone on this sweep"
+
+
+def test_cost_grows_with_the_number_of_equal_violations():
+    """Duplicating a violated constraint doubles J (proves there is no averaging)."""
+    codec = _codec(32)
+    pack = _box_pack(codec)
+    q = _violating_controls(32)
+
+    def doubled(p):
+        return p.__class__(
+            extraction=p.extraction.clone(), piece_A=p.piece_A.clone(),
+            piece_b=p.piece_b.clone(), face_mask=p.face_mask.clone(),
+            piece_mask=p.piece_mask.clone(),
+            piece_region_id=p.piece_region_id.clone(),
+            intervals=p.intervals.clone(), num_pieces=p.num_pieces.clone())
+
+    one = doubled(pack)
+    one.piece_mask[0, 1:] = False                    # a single piece only
+    two = doubled(pack)
+    two.piece_mask[0, 2:] = False                    # two identical pieces
+    single, _, _ = constraint_loss_and_grad(q, one)
+    pair, _, _ = constraint_loss_and_grad(q, two)
+    assert float(pair) == pytest.approx(2.0 * float(single), rel=1e-4)
+
+
+# --------------------------------------------------------------------------- #
+# trust region as step length + backtracking acceptance (review 5 / problem B)
+# --------------------------------------------------------------------------- #
+def test_trust_region_is_the_actual_step_length():
+    codec = _codec(32)
+    pack = _box_pack(codec)
+    decoder = BoundaryDecoder(dtype=torch.float32)
+    start_goal = torch.tensor([[[-0.9, -0.9], [0.9, 0.9]]])
+    q = decoder(_violating_controls(32), start_goal)
+    limit = 0.004
+    guided, stats = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                              step_size=1.0, max_delta_scene=limit)
+    assert bool(stats["accepted"][0])
+    moved = float((guided - q).norm(dim=-1).max())
+    assert moved == pytest.approx(limit, rel=1e-4), \
+        "an accepted alpha=1 step must move exactly the trust-region length"
+
+
+def test_backtracking_shortens_an_overshooting_step():
+    """A trust region wider than the corridor overshoots: alpha < 1 must be used."""
+    codec = _codec(32)
+    # a very narrow corridor (|x| <= 0.02 scene = 0.64 m) so a big step crosses it
+    A = np.array([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]])
+    b = np.array([0.02, 0.02, 1.0, 1.0])
+    table = {"cell_A": np.repeat(A[None], 32, axis=0),
+             "cell_b": np.repeat(b[None], 32, axis=0),
+             "cell_mask": np.ones(32, dtype=bool),
+             "cell_is_box": np.ones(32, dtype=bool),
+             "anchors": np.linspace(0.0, 1.0, 32)}
+    pack = pack_from_tables(codec, [table])
+    decoder = BoundaryDecoder(dtype=torch.float32)
+    start_goal = torch.tensor([[[-0.5, 0.0], [0.5, 0.0]]])
+    q = torch.zeros(1, 32, 2)
+    q[0, 10:22, 0] = 0.2                            # 0.2 > 0.02: outside the corridor
+    q = decoder(q, start_goal)
+    before, _, _ = constraint_loss_and_grad(q, pack)
+    guided, stats = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                              step_size=1.0, max_delta_scene=0.8)
+    after, _, _ = constraint_loss_and_grad(guided, pack)
+    assert float(before) > 0.0
+    assert float(after) < float(before), "the accepted step must improve the cost"
+    assert float(stats["alpha"][0]) < 1.0, "a 0.8 m step must be backtracked here"
+    assert float((guided - q).norm(dim=-1).max()) <= 0.8 + 1e-6
+
+
+def test_a_step_that_cannot_improve_is_rejected():
+    """Strict decrease or nothing: a numerically hopeless trial leaves Q alone."""
+    codec = _codec(32)
+    pack = _box_pack(codec)
+    decoder = BoundaryDecoder(dtype=torch.float32)
+    start_goal = torch.tensor([[[-0.9, -0.9], [0.9, 0.9]]])
+    q = decoder(_violating_controls(32), start_goal)
+    # 1e-12 of the (already normalised) direction changes nothing in float32
+    guided, stats = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                              step_size=1.0, max_delta_scene=0.004,
+                                              backtrack_factors=(1e-12,))
+    assert torch.equal(guided, q), "no decrease -> the guidance must be a no-op"
+    assert not bool(stats["accepted"][0])
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_acceptance_never_increases_the_cost(seed):
+    """Over random polygons the accepted step is always a strict improvement."""
+    from gp_diffuser.trajectory.bspline import BSplineCodec
+    codec = BSplineCodec(degree=3, num_controls=32, curve_points=128)
+    pack = _box_pack(codec)
+    decoder = BoundaryDecoder(dtype=torch.float32)
+    torch.manual_seed(seed)
+    q = torch.randn(4, 32, 2) * 0.6
+    start_goal = torch.tensor([[[-0.7, -0.7], [0.7, 0.7]]]).repeat(4, 1, 1)
+    q = decoder(q, start_goal)
+    before, _, _ = constraint_loss_and_grad(q, pack)
+    guided, stats = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                              step_size=1.0, max_delta_scene=0.25)
+    after, _, _ = constraint_loss_and_grad(guided, pack)
+    accepted = stats["accepted"]
+    assert bool(accepted.any()), "at least one sample should improve"
+    assert torch.all(after[accepted] < before[accepted] + 1e-9)
+    rejected = stats["rejected"]
+    assert torch.equal(guided[rejected], q[rejected]), "rejected rows stay untouched"
+
+
+def test_zero_step_size_produces_no_motion():
+    codec = _codec(32)
+    pack = _box_pack(codec)
+    decoder = BoundaryDecoder(dtype=torch.float32)
+    start_goal = torch.tensor([[[-0.9, -0.9], [0.9, 0.9]]])
+    q = decoder(_violating_controls(32), start_goal)
+    guided, stats = clean_prediction_guidance(q, pack, decoder, start_goal,
+                                              step_size=0.0, max_delta_scene=0.25)
+    assert torch.equal(guided, q)
+    assert not bool(stats["guidance_applied"].any())
